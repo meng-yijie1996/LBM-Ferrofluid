@@ -1,7 +1,7 @@
 # LBM-Based Ferrofluid
 
 
-![result1](demo\Ferrofluid.png) 
+<img src="demo/Ferrofluid.png" height="270">
 
 
 ### How to run the code
