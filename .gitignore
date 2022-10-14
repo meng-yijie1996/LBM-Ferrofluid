@@ -1,0 +1,5 @@
+demo/demo_data*/
+build/
+.vscode
+*/__pycache__/
+__pycache__/
