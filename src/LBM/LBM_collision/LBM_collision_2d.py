@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 
 from src.LBM.LBM_collision import AbstractLBMCollision
-from src.LBM.utils import CellType
+from src.LBM.utils import CellType, KBCType
 
 
 class LBMCollision2d(AbstractLBMCollision):
@@ -61,28 +61,6 @@ class LBMCollision2d(AbstractLBMCollision):
         self._gravity = torch.Tensor(
             [0.0, -gravity]
         ).reshape(1, dim, *([1] * dim)).to(self.device).to(self.dtype)
-    
-    def preset_KBC(self, dx: float, dt: float):
-        c = dx / dt
-        c2 = c * c
-        c3 = c * c2
-        c4 = c2 * c2
-
-        self.C_mat = torch.zeros((self._Q, 3, 3)).to(self.device).to(self.dtype)
-        # Q - x - y
-        self.C_mat[:, 0, 0] = 1 * torch.Tensor([1, 1, 1, 1, 1, 1, 1, 1, 1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 1, 0] = c * torch.Tensor([0, 1, 0, -1, 0, 1, -1, -1, 1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 0, 1] = c * torch.Tensor([0, 0, 1, 0, -1, 1, 1, -1, -1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 2, 0] = c2 * torch.Tensor([0, 1, 0, 1, 0, 1, 1, 1, 1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 0, 2] = c2 * torch.Tensor([0, 0, 1, 0, 1, 1, 1, 1, 1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 1, 1] = c2 * torch.Tensor([0, 0, 0, 0, 0, 1, -1, 1, -1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 2, 2] = c4 * torch.Tensor([0, 0, 0, 0, 0, 1, 1, 1, 1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 2, 1] = c3 * torch.Tensor([0, 0, 0, 0, 0, 1, 1, -1, -1]).to(self.device).to(self.dtype)
-        self.C_mat[:, 1, 2] = c3 * torch.Tensor([0, 0, 0, 0, 0, 1, -1, -1, 1]).to(self.device).to(self.dtype)
-
-        self.C_mat = self.C_mat.reshape(
-            1, self._Q, 1, 1, 3, 3
-        )  #  [B, Q, res, 3, 3]
     
     def get_feq_(
         self,
@@ -155,7 +133,7 @@ class LBMCollision2d(AbstractLBMCollision):
         feq: torch.Tensor,
         rho: torch.Tensor,
         vel: torch.Tensor,
-        KBC_case: str='C'
+        KBC_type: int=int(KBCType.KBC_C)
     ):
         beta = 0.5 / self._tau
 
@@ -163,14 +141,14 @@ class LBMCollision2d(AbstractLBMCollision):
 
         moment = torch.zeros((*rho.shape, 3, 3)).to(rho.device).to(rho.dtype)
         moment_eq = torch.zeros((*rho.shape, 3, 3)).to(rho.device).to(rho.dtype)
-        if KBC_case == 'C' or KBC_case == 'D':
+        if KBC_type == int(KBCType.KBC_C) or KBC_type == int(KBCType.KBC_D):
             moment = (
                 self.C_mat * f.unsqueeze(-1).unsqueeze(-1)
             ).sum(dim=1).unsqueeze(1)  # [B, 1, res, 3, 3]
             moment_eq = (
                 self.C_mat * feq.unsqueeze(-1).unsqueeze(-1)
             ).sum(dim=1).unsqueeze(1)  # [B, 1, res, 3, 3]
-        elif KBC_case == 'A' or KBC_case == 'B':
+        elif KBC_type == int(KBCType.KBC_A) or KBC_type == int(KBCType.KBC_B):
             for i in range(3):
                 for j in range(3):
                     temp_val =  (
@@ -196,7 +174,7 @@ class LBMCollision2d(AbstractLBMCollision):
         # KBC_A_eq = moment_eq[..., 2, 2]
 
         KBC_ds = torch.zeros_like(f)
-        if KBC_case == 'A' or KBC_case == 'C':
+        if KBC_type == int(KBCType.KBC_A) or KBC_type == int(KBCType.KBC_C):
             # T, N, PI only
             KBC_ds[:, 0:1, ...] = (
                 (1.0 - KBC_T) - (1.0 - KBC_T_eq)
@@ -235,7 +213,7 @@ class LBMCollision2d(AbstractLBMCollision):
                 (-KBC_PIxy) -
                 (-KBC_PIxy_eq)
             )   # 1, -1
-        elif KBC_case ==  'B' or KBC_case == 'D':
+        elif KBC_type ==  int(KBCType.KBC_B) or KBC_type == int(KBCType.KBC_D):
             # N, PI only
             KBC_ds[:, 0:1, ...] = (
                 (1.0) - (1.0)
@@ -292,7 +270,7 @@ class LBMCollision2d(AbstractLBMCollision):
         vel: torch.Tensor,
         flags: torch.Tensor,
         force: torch.Tensor,
-        KBC_case: str=None
+        KBC_type: int=None
     ) -> torch.Tensor:
         """
         Args:
@@ -301,7 +279,7 @@ class LBMCollision2d(AbstractLBMCollision):
             vel: velocity [B, dim, res]
             flags: flags [B, 1, res]
             force: force [B, dim, res]
-            KBC_case: str = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
+            KBC_type: int = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
 
         Returns:
             torch.Tensor: f after streaming [B, Q, res]
@@ -310,16 +288,7 @@ class LBMCollision2d(AbstractLBMCollision):
         tau = self._tau
 
         feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=force)
-
-        if KBC_case is None or KBC_case == "LBGK":
-            collision_f = (1.0 - 1.0 / tau) * f + feq / tau
-        elif KBC_case in ['A', 'B', 'C', 'D']:
-            self.preset_KBC(dx=dx, dt=dt)
-            collision_f = self.KBC_postprocess(
-                dx=dx, dt=dt, f=f, feq=feq, rho=rho, vel=vel, KBC_case=KBC_case
-            )
-        else:
-            raise RuntimeError("Please indicates KBC mode as a right value")
+        collision_f = (1.0 - 1.0 / tau) * f + feq / tau
         f_new = torch.where(
             flags == int(CellType.OBSTACLE),
             f,

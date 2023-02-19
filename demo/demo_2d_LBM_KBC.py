@@ -2,7 +2,6 @@ import sys, os
 import numpy as np
 import pathlib
 import torch
-import torch.nn.functional as F
 import imageio
 import argparse
 import math
@@ -11,7 +10,7 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType
+from src.LBM.utils import mkdir, save_img, CellType, KBCType
 from tqdm import tqdm
 
 
@@ -24,19 +23,18 @@ def main(
     dim = 2
     Q = 9
 
-    density_gas = 0.02381
-    density_fluid = 0.2508
-    rho_gas = 0.02381
-    rho_fluid = 0.2508
+    KBC_sigma = 0.05
+    KBC_kappa = 80.0
 
     c = dx / dt
     cs2 = c * c / 3.0
 
-    kappa = 0.1  # sigma / Ia
-
-    tau_f = 0.7  # 0.5 + vis / cs2
-    tau_g = tau_f
-
+    Re = 3000.0
+    Vmax = 0.2
+    Lmax = max(res) * dx
+    visc = Vmax * Lmax / Re
+    tau = 0.5 + visc / cs2
+    
     # dimension of the
     batch_size = 1
 
@@ -54,15 +52,11 @@ def main(
         device=device,
         simulation_size=simulation_size,
         dt=dt,
-        density_gas=density_gas,
-        density_fluid=density_fluid,
-        contact_angle=torch.Tensor([0.75 * math.pi]).to(device).to(dtype),
+        density_gas=0.038,
+        density_fluid=0.265,
+        contact_angle=torch.Tensor([0.5 * math.pi]).to(device).to(dtype),
         Q=Q,
-        rho_gas=rho_gas,
-        rho_fluid=rho_fluid,
-        kappa=kappa,
-        tau_g=tau_g,
-        tau_f=tau_f,
+        tau=tau,
         k=0.33
     )
 
@@ -71,67 +65,61 @@ def main(
 
     # initialize all the required grids
     flags = torch.zeros((batch_size, 1, *res)).to(device).to(torch.uint8)
-    rho = torch.zeros((batch_size, 1, *res)).to(device).to(dtype)
     vel = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     density = torch.zeros((batch_size, 1, *res)).to(device).to(dtype)
     force = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     f = torch.zeros((batch_size, Q, *res)).to(device).to(dtype)
 
-    # create external force, advection and pressure projection
+    # create prop, macro and collision
     prop = simulationRunner.create_propagation()
     macro = simulationRunner.create_macro_compute()
-    collision = simulationRunner.create_collision_HCZ()
+    collision = simulationRunner.create_collision_MRT()
     collision.preset_KBC(dx=dx, dt=dt)
-    collision.set_gravity(gravity=0)
 
     # initialize the domain
-    wall = ["xXyY"]
+    wall = ["    "]
     flags[...] = int(CellType.FLUID)
-    flags = F.pad(flags[..., 1:-1, 1:-1], pad=(1, 1, 1, 1), mode="constant", value=int(CellType.OBSTACLE))
     
     path = pathlib.Path(__file__).parent.absolute()
-    mkdir(f"{path}/demo_data_LBM_{dim}d_multiphase/")
+    mkdir(f"{path}/demo_data_LBM_{dim}d_KBC/")
     fileList = []
-
-    # create a droplet
-    box_radius = 0.4 * max(res) / 2
+    density[...] = 0.265
     for j in range(res[0]):
         for i in range(res[1]):
-            if abs(j - res[0] / 2) <= box_radius and abs(i - res[1] / 2) <= box_radius:
-                rho[..., j, i] = rho_fluid
-                density[..., j, i] = density_fluid
+            vel[:, 1, j, i] = KBC_sigma * Vmax * math.sin(
+                2.0 * math.pi * (1.0 * i / res[1] + 0.25)
+            )
+            if j <= (res[0] / 2.0):
+                vel[:, 0, j, i] = Vmax * math.tanh(
+                    KBC_kappa * (1.0 * j / res[0] - 0.25)
+                )
             else:
-                rho[..., j, i] = rho_gas
-                density[..., j, i] = density_gas
-    pressure = macro.get_pressure(dx=dx, dt=dt, density=density)
+                vel[:, 0, j, i] = Vmax * math.tanh(
+                    KBC_kappa * (-1.0 * j / res[0] + 0.75)
+                )
     f = collision.get_feq_(dx=dx, dt=dt, rho=density, vel=vel, force=force)
-    g = collision.get_geq_(dx=dx, dt=dt, rho=density, vel=vel, pressure=pressure, force=force, feq=f)
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
-        g = prop.propagation(f=g)
 
-        rho, vel, density = macro.macro_compute(dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density)
+        density, vel = macro.macro_compute(dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags)
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
-        g = prop.rebounce_obstacle(f=g, flags=flags)
 
-        rho, vel, density, pressure, force, dfai, dprho = collision.capillary_process(
-            rho=rho, vel=vel, flags=flags, force=force, dt=dt, dx=dx, g=g, density=density, pressure=pressure
-        )
-        f, g = collision.collision(
-            dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, force=force, g=g, pressure=pressure, dfai=dfai, dprho=dprho
-        )
+        f = collision.collision(dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags, force=force, KBC_type=int(KBCType.KBC_A))
+
+        vel_max = torch.abs(vel).max().item()
 
         simulationRunner.step()
-        # impl this
+        
         if step % 10 == 0:
-            filename = str(path) + "/demo_data_LBM_{}d_multiphase/{:03}.png".format(dim, step + 1)
-            save_img(density, filename=filename)
+            filename = str(path) + "/demo_data_LBM_{}d_KBC/{:03}.png".format(dim, step + 1)
+            vort = macro.get_vort(vel=vel, dx=dx)
+            save_img(vort, filename=filename)
             fileList.append(filename)
 
     #  VIDEO Loop
-    writer = imageio.get_writer(f"{path}/{dim}d_LBM_multiphase.mp4", fps=25)
+    writer = imageio.get_writer(f"{path}/{dim}d_LBM_KBC.mp4", fps=25)
 
     for im in fileList:
         writer.append_data(imageio.imread(im))
@@ -154,7 +142,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--total_steps",
         type=int,
-        default=4000,
+        default=1000,
         help="For how many step to run the simulation",
     )
 

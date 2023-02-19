@@ -11,6 +11,7 @@ from src.LBM.LBM_macro_compute import (
 from src.LBM.LBM_collision import (
     LBMCollision2d,
     LBMCollision3d,
+    LBMCollisionMRT2d,
     LBMCollisionHCZ2d,
     LBMCollisionHCZ3d
 )
@@ -91,6 +92,25 @@ class SimulationRunner(object):
                 dtype=self.parameters.dtype,
                 device=self.parameters.device,
             )
+    
+    def create_collision_MRT(self):
+        if self.parameters.is_2d():
+            return LBMCollisionMRT2d(
+                Q=self.parameters.Q,
+                tau=self.parameters.tau,
+                density_liquid=self.parameters.density_fluid,
+                density_gas=self.parameters.density_gas,
+                rho_liquid=self.parameters.rho_fluid,
+                rho_gas=self.parameters.rho_gas,
+                kappa=self.parameters.kappa,
+                tau_f=self.parameters.tau_f,
+                tau_g=self.parameters.tau_g,
+                contact_angle=self.parameters.contact_angle,
+                dtype=self.parameters.dtype,
+                device=self.parameters.device,
+            )
+        else:
+            pass
     
     def create_collision_HCZ(self):
         if self.parameters.is_2d():

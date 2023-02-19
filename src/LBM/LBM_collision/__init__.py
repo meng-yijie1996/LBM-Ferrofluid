@@ -1,5 +1,6 @@
 from .abstract_LBM_collision import AbstractLBMCollision
 from .LBM_collision_2d import LBMCollision2d
 from .LBM_collision_3d import LBMCollision3d
+from .LBM_collision_MRT_2d import LBMCollisionMRT2d
 from .LBM_collision_HCZ_2d import LBMCollisionHCZ2d
 from .LBM_collision_HCZ_3d import LBMCollisionHCZ3d

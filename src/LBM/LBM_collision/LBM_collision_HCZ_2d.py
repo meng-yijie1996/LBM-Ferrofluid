@@ -4,12 +4,12 @@ import torch
 import torch.nn.functional as F
 from typing import List
 
-from src.LBM.LBM_collision import LBMCollision2d
+from src.LBM.LBM_collision import LBMCollisionMRT2d
 from src.LBM.utils import CellType
 
 
-class LBMCollisionHCZ2d(LBMCollision2d):
-    rank = 3
+class LBMCollisionHCZ2d(LBMCollisionMRT2d):
+    rank = 2
 
     def __init__(
         self,
@@ -251,7 +251,7 @@ class LBMCollisionHCZ2d(LBMCollision2d):
         pressure: torch.Tensor = None,
         dfai: torch.Tensor = None,
         dprho: torch.Tensor = None,
-        KBC_case: str = None
+        KBC_type: int = None
     ) -> List[torch.Tensor]:
         """
         Args:
@@ -260,7 +260,7 @@ class LBMCollisionHCZ2d(LBMCollision2d):
             vel: velocity [B, dim, res]
             flags: flags [B, 1, res]
             force: force [B, dim, res]
-            KBC_case: str = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
+            KBC_type: int = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
 
         Returns:
             torch.Tensor: f after streaming [B, Q, res]

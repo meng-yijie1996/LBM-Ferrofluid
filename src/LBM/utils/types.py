@@ -56,3 +56,34 @@ class CellType(Enum):
         norm = matplotlib.colors.BoundaryNorm(norm_bins, len_lab, clip=True)
         fmt = matplotlib.ticker.FuncFormatter(lambda x, pos: labels[norm(x)])
         return cm, fmt, norm, norm_bins
+
+
+class KBCType(Enum):
+    LBGK = 0  # 0b00000000
+    KBC_A = 0b10000101
+    KBC_B = 0b10000110
+    KBC_C = 0b10001001
+    KBC_D = 0b10001010
+
+    def __int__(self):
+        return self.value
+    
+    @staticmethod
+    def is_KBC(input: int) -> bool:
+        return (input & 0b10000000) > 0
+    
+    @staticmethod
+    def is_KBC_AC(input: int) -> bool:
+        return (input & 0b10000001) > 0
+    
+    @staticmethod
+    def is_KBC_BD(input: int) -> bool:
+        return (input & 0b10000010) > 0
+    
+    @staticmethod
+    def is_KBC_AB(input: int) -> bool:
+        return (input & 0b10000100) > 0
+    
+    @staticmethod
+    def is_KBC_CD(input: int) -> bool:
+        return (input & 0b10001000) > 0

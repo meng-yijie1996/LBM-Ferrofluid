@@ -1,3 +1,3 @@
-from .cell_type import *
+from .types import *
 from .io import *
 from .grid import *

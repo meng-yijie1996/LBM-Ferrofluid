@@ -324,7 +324,7 @@ class LBMCollisionHCZ3d(LBMCollision3d):
         pressure: torch.Tensor = None,
         dfai: torch.Tensor = None,
         dprho: torch.Tensor =  None,
-        KBC_case: str = None
+        KBC_type: int = None
     ) -> List[torch.Tensor]:
         """
         Args:
@@ -333,7 +333,7 @@ class LBMCollisionHCZ3d(LBMCollision3d):
             vel (torch.Tensor): velocity [B, dim, res]
             flags (torch.Tensor): flags [B, 1, res]
             force (torch.Tensor): force [B, dim, res]
-            KBC_case: str = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
+            KBC_type: int = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
 
         Returns:
             List[torch.Tensor]: f,g after streaming [B, Q, res]

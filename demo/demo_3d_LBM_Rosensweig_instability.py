@@ -134,6 +134,7 @@ def main(
         eye=eye,
         camera_direction=look_at,
         near=1.0,
+        bg_color=torch.Tensor([1.0, 1.0, 1.0]).to(device),
         device=device
     )
 

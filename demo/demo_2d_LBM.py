@@ -105,7 +105,7 @@ def main(
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
 
-        f = collision.collision(dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags, force=force, KBC_case=None)
+        f = collision.collision(dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags, force=force, KBC_type=None)
 
         vel_max = torch.abs(vel).max().item()
 
