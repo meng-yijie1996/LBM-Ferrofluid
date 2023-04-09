@@ -117,7 +117,14 @@ def main(
     pressure = macro.get_pressure(dx=dx, dt=dt, density=density)
     f = collision.get_feq_(dx=dx, dt=dt, rho=density, vel=vel, force=force)
     g = collision.get_geq_(
-        dx=dx, dt=dt, rho=density, vel=vel, pressure=pressure, force=force, feq=f
+        dx=dx,
+        dt=dt,
+        rho=rho,
+        vel=vel,
+        density=density,
+        pressure=pressure,
+        force=force,
+        feq=f,
     )
 
     H_ext_mac = [
@@ -170,6 +177,7 @@ def main(
             f=f,
             rho=rho,
             vel=vel,
+            density=density,
             flags=flags,
             force=force,
             g=g,

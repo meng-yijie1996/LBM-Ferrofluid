@@ -287,6 +287,7 @@ class LBMCollisionHCZ3d(LBMCollision3d):
         f: torch.Tensor,
         rho: torch.Tensor,
         vel: torch.Tensor,
+        density: torch.Tensor,
         flags: torch.Tensor,
         force: torch.Tensor,
         g: torch.Tensor = None,
@@ -300,6 +301,7 @@ class LBMCollisionHCZ3d(LBMCollision3d):
             f (torch.Tensor): f before streaming [B, Q, res]
             rho (torch.Tensor): density [B, 1, res]
             vel (torch.Tensor): velocity [B, dim, res]
+            density (torch.Tensor): density [B, 1, res]
             flags (torch.Tensor): flags [B, 1, res]
             force (torch.Tensor): force [B, dim, res]
             KBC_type: int = [None, 'A', 'B', 'C', 'D'], where None is LBGK case, 'A/B/C/D' is different KBC cases
@@ -315,7 +317,14 @@ class LBMCollisionHCZ3d(LBMCollision3d):
 
         feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=None)
         geq = self.get_geq_(
-            dx=dx, dt=dt, rho=rho, vel=vel, force=None, pressure=pressure, feq=feq
+            dx=dx,
+            dt=dt,
+            rho=rho,
+            vel=vel,
+            density=density,
+            force=None,
+            pressure=pressure,
+            feq=feq,
         )
 
         Gamma_u = self.compute_Gamma(dx=dx, dt=dt, vel=vel)

@@ -192,6 +192,7 @@ class LBMCollision3d(AbstractLBMCollision):
         dt: float,
         rho: torch.Tensor,
         vel: torch.Tensor,
+        density: torch.Tensor,
         pressure: torch.Tensor,
         force: torch.Tensor,
         feq: torch.Tensor = None,
@@ -201,7 +202,7 @@ class LBMCollision3d(AbstractLBMCollision):
         if feq is None:
             feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=force)
 
-        geq = self._weight * (pressure + cs2 * rho * (feq / self._weight / rho - 1.0))
+        geq = self._weight * (pressure - cs2 * density) + cs2 * density / rho * feq
 
         return geq
 
