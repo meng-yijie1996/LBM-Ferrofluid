@@ -1,4 +1,4 @@
-import sys, os
+import sys
 import numpy as np
 import pathlib
 import torch
@@ -34,7 +34,7 @@ def main(
     Lmax = max(res) * dx
     visc = Vmax * Lmax / Re
     tau = 0.5 + visc / cs2
-    
+
     # dimension of the
     batch_size = 1
 
@@ -57,7 +57,7 @@ def main(
         contact_angle=torch.Tensor([0.5 * math.pi]).to(device).to(dtype),
         Q=Q,
         tau=tau,
-        k=0.33
+        k=0.33,
     )
 
     # create a simulation runner
@@ -76,17 +76,17 @@ def main(
     collision = simulationRunner.create_collision()
 
     # initialize the domain
-    wall = ["    "]
+    # wall = ["    "]
     flags[...] = int(CellType.FLUID)
-    
+
     path = pathlib.Path(__file__).parent.absolute()
     mkdir(f"{path}/demo_data_LBM_{dim}d/")
     fileList = []
     density[...] = 0.265
     for j in range(res[0]):
         for i in range(res[1]):
-            vel[:, 1, j, i] = KBC_sigma * Vmax * math.sin(
-                2.0 * math.pi * (1.0 * i / res[1] + 0.25)
+            vel[:, 1, j, i] = (
+                KBC_sigma * Vmax * math.sin(2.0 * math.pi * (1.0 * i / res[1] + 0.25))
             )
             if j <= (res[0] / 2.0):
                 vel[:, 0, j, i] = Vmax * math.tanh(
@@ -101,16 +101,25 @@ def main(
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
 
-        density, vel = macro.macro_compute(dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags)
+        density, vel = macro.macro_compute(
+            dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags
+        )
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
 
-        f = collision.collision(dx=dx, dt=dt, f=f, rho=density, vel=vel, flags=flags, force=force, KBC_type=None)
-
-        vel_max = torch.abs(vel).max().item()
+        f = collision.collision(
+            dx=dx,
+            dt=dt,
+            f=f,
+            rho=density,
+            vel=vel,
+            flags=flags,
+            force=force,
+            KBC_type=None,
+        )
 
         simulationRunner.step()
-        
+
         if step % 10 == 0:
             filename = str(path) + "/demo_data_LBM_{}d/{:03}.png".format(dim, step + 1)
             vort = macro.get_vort(vel=vel, dx=dx)

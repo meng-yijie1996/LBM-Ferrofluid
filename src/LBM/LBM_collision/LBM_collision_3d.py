@@ -17,7 +17,7 @@ class LBMCollision3d(AbstractLBMCollision):
         density_gas: float = 0.038,
         rho_liquid: float = 0.265,
         rho_gas: float = 0.038,
-        kappa: float =  0.08,
+        kappa: float = 0.08,
         tau_f: float = 0.7,
         tau_g: float = 0.7,
         contact_angle: float = math.pi / 2.0,
@@ -43,33 +43,93 @@ class LBMCollision3d(AbstractLBMCollision):
         self.device = device
         self.dtype = dtype
 
-        self._weight = torch.Tensor(
-            [1.0 / 3.0,
-            1.0 / 18.0, 1.0 / 18.0, 1.0 / 18.0, 1.0 / 18.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0,
-            1.0 / 18.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0,
-            1.0 / 18.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0]
-        ).reshape(1, Q, 1, 1, 1).to(self.device).to(self.dtype)
+        self._weight = (
+            torch.Tensor(
+                [
+                    1.0 / 3.0,
+                    1.0 / 18.0,
+                    1.0 / 18.0,
+                    1.0 / 18.0,
+                    1.0 / 18.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 18.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 18.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                ]
+            )
+            .reshape(1, Q, 1, 1, 1)
+            .to(self.device)
+            .to(self.dtype)
+        )
 
         # x, y, z direction
-        self._e = torch.Tensor(
-            [[0, 0, 0],
-            [1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0],
-            [1, 1, 0], [-1, 1, 0], [-1, -1, 0], [1, -1, 0],
-            [0, 0, 1],
-            [1, 0, 1], [0, 1, 1], [-1, 0, 1], [0, -1, 1],
-            [0, 0, -1],
-            [1, 0, -1], [0, 1, -1], [-1, 0, -1], [0, -1, -1]]
-        ).reshape(1, Q, 3, 1, 1, 1).to(self.device).to(torch.int64)
-    
+        self._e = (
+            torch.Tensor(
+                [
+                    [0, 0, 0],
+                    [1, 0, 0],
+                    [0, 1, 0],
+                    [-1, 0, 0],
+                    [0, -1, 0],
+                    [1, 1, 0],
+                    [-1, 1, 0],
+                    [-1, -1, 0],
+                    [1, -1, 0],
+                    [0, 0, 1],
+                    [1, 0, 1],
+                    [0, 1, 1],
+                    [-1, 0, 1],
+                    [0, -1, 1],
+                    [0, 0, -1],
+                    [1, 0, -1],
+                    [0, 1, -1],
+                    [-1, 0, -1],
+                    [0, -1, -1],
+                ]
+            )
+            .reshape(1, Q, 3, 1, 1, 1)
+            .to(self.device)
+            .to(torch.int64)
+        )
+
+    def equation_of_states(self, dx: float, dt: float, rho: torch.Tensor):
+        c = dx / dt
+        cs2 = c * c / 3.0
+        RT = cs2
+        a = 12.0 * RT
+        b = 4.0
+
+        temp_rho = b * rho / 4.0
+        pressure = (
+            rho
+            * RT
+            * (4.0 * temp_rho - 2.0 * temp_rho * temp_rho)
+            / torch.pow(1.0 - temp_rho, 3)
+            + rho * RT
+            - a * rho * rho
+        )
+
+        return pressure
+
     def set_gravity(self, gravity: float):
         dim = 3
-        self._gravity = torch.Tensor(
-            [0.0, -gravity, 0.0]
-        ).reshape(1, dim, *([1] * dim)).to(self.device).to(self.dtype)
-    
+        self._gravity = (
+            torch.Tensor([0.0, -gravity, 0.0])
+            .reshape(1, dim, *([1] * dim))
+            .to(self.device)
+            .to(self.dtype)
+        )
+
     def get_feq_(
         self,
         dx: float,
@@ -78,22 +138,36 @@ class LBMCollision3d(AbstractLBMCollision):
         vel: torch.Tensor,
         force: torch.Tensor = None,
     ) -> torch.Tensor:
-        dim = 3
         tau = self._tau
         if force is not None:
             vel = vel + tau * force / rho
-        
+
         c = dx / dt
-        cs2 = c * c / 3.0
 
         temp_val = torch.sqrt(1.0 + 3.0 * vel * vel / c / c)
-        feq = rho * self._weight * (
-            (2.0 - temp_val[:, 0:1, ...]) *
-            (2.0 - temp_val[:, 1:2, ...]) *
-            (2.0 - temp_val[:, 2:3, ...]) *
-            torch.pow((2.0 * vel[:, 0:1, ...] / c + temp_val[:, 0:1, ...]) / (1.0 - vel[:, 0:1, ...] / c), self._e[:, :, 0, ...]) *
-            torch.pow((2.0 * vel[:, 1:2, ...] / c + temp_val[:, 1:2, ...]) / (1.0 - vel[:, 1:2, ...] / c), self._e[:, :, 1, ...]) *
-            torch.pow((2.0 * vel[:, 2:3, ...] / c + temp_val[:, 2:3, ...]) / (1.0 - vel[:, 2:3, ...] / c), self._e[:, :, 2, ...])
+        feq = (
+            rho
+            * self._weight
+            * (
+                (2.0 - temp_val[:, 0:1, ...])
+                * (2.0 - temp_val[:, 1:2, ...])
+                * (2.0 - temp_val[:, 2:3, ...])
+                * torch.pow(
+                    (2.0 * vel[:, 0:1, ...] / c + temp_val[:, 0:1, ...])
+                    / (1.0 - vel[:, 0:1, ...] / c),
+                    self._e[:, :, 0, ...],
+                )
+                * torch.pow(
+                    (2.0 * vel[:, 1:2, ...] / c + temp_val[:, 1:2, ...])
+                    / (1.0 - vel[:, 1:2, ...] / c),
+                    self._e[:, :, 1, ...],
+                )
+                * torch.pow(
+                    (2.0 * vel[:, 2:3, ...] / c + temp_val[:, 2:3, ...])
+                    / (1.0 - vel[:, 2:3, ...] / c),
+                    self._e[:, :, 2, ...],
+                )
+            )
         )
 
         # # constraint of nan
@@ -109,9 +183,9 @@ class LBMCollision3d(AbstractLBMCollision):
         # feq = rho * self._weight * (
         #     1.0 + eu / cs2 + 0.5 * eu * eu / cs2 / cs2 - 0.5 * uv / cs2
         # )
-        
+
         return feq
-    
+
     def get_geq_(
         self,
         dx: float,
@@ -120,21 +194,131 @@ class LBMCollision3d(AbstractLBMCollision):
         vel: torch.Tensor,
         pressure: torch.Tensor,
         force: torch.Tensor,
-        feq: torch.Tensor = None
+        feq: torch.Tensor = None,
     ) -> torch.Tensor:
         c = dx / dt
         cs2 = c * c / 3.0
         if feq is None:
             feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=force)
 
-        geq = self._weight * (
-            pressure + cs2 * rho * (
-                feq / self._weight / rho - 1.0
-            )
-        )
-        
+        geq = self._weight * (pressure + cs2 * rho * (feq / self._weight / rho - 1.0))
+
         return geq
-    
+
+    @staticmethod
+    def get_grad(input_: torch.Tensor, dx: float, flags: torch.Tensor) -> torch.Tensor:
+        if input_.shape[1] != 1:
+            raise RuntimeError("To get your grad operation, channel dim has to be 1")
+
+        dim = 3
+        pad = (1, 1, 1, 1, 1, 1)
+
+        output_inner = torch.zeros_like(input_[..., 1:-1, 1:-1, 1:-1]).repeat(
+            1, 3, *([1] * dim)
+        )
+        output_inner[:, 0:1, ...] = (
+            (
+                2.0 * (input_[..., 1:-1, 1:-1, 2:] - input_[..., 1:-1, 1:-1, :-2])
+                + (
+                    input_[..., 2:, 1:-1, 2:]
+                    - input_[..., :-2, 1:-1, :-2]
+                    + input_[..., :-2, 1:-1, 2:]
+                    - input_[..., 2:, 1:-1, :-2]
+                    + input_[..., 1:-1, 2:, 2:]
+                    - input_[..., 1:-1, :-2, :-2]
+                    + input_[..., 1:-1, :-2, 2:]
+                    - input_[..., 1:-1, 2:, :-2]
+                )
+            )
+            / 12.0
+            / dx
+        )
+
+        output_inner[:, 1:2, ...] = (
+            (
+                2.0 * (input_[..., 1:-1, 2:, 1:-1] - input_[..., 1:-1, :-2, 1:-1])
+                + (
+                    input_[..., 2:, 2:, 1:-1]
+                    - input_[..., :-2, :-2, 1:-1]
+                    + input_[..., :-2, 2:, 1:-1]
+                    - input_[..., 2:, :-2, 1:-1]
+                    + input_[..., 1:-1, 2:, 2:]
+                    - input_[..., 1:-1, :-2, :-2]
+                    + input_[..., 1:-1, 2:, :-2]
+                    - input_[..., 1:-1, :-2, 2:]
+                )
+            )
+            / 12.0
+            / dx
+        )
+
+        output_inner[:, 2:3, ...] = (
+            (
+                2.0 * (input_[..., 2:, 1:-1, 1:-1] - input_[..., :-2, 1:-1, 1:-1])
+                + (
+                    input_[..., 2:, 2:, 1:-1]
+                    - input_[..., :-2, :-2, 1:-1]
+                    + input_[..., 2:, :-2, 1:-1]
+                    - input_[..., :-2, 2:, 1:-1]
+                    + input_[..., 2:, 1:-1, 2:]
+                    - input_[..., :-2, 1:-1, :-2]
+                    + input_[..., 2:, 1:-1, :-2]
+                    - input_[..., :-2, 1:-1, 2:]
+                )
+            )
+            / 12.0
+            / dx
+        )
+
+        output = torch.where(
+            flags == int(CellType.OBSTACLE),
+            F.pad(output_inner, pad=pad, mode="constant", value=0),
+            F.pad(output_inner, pad=pad, mode="replicate"),
+        )
+
+        # output = F.pad(output_inner, pad=pad, mode="replicate")
+
+        return output
+
+    def get_laplacian(
+        self, input_: torch.Tensor, dx: float, flags: torch.Tensor
+    ) -> torch.Tensor:
+        output_ = F.pad(
+            (
+                2.0
+                * (
+                    input_[..., 1:-1, 1:-1, 2:]
+                    + input_[..., 1:-1, 1:-1, :-2]
+                    + input_[..., 1:-1, 2:, 1:-1]
+                    + input_[..., 1:-1, :-2, 1:-1]
+                    + input_[..., 2:, 1:-1, 1:-1]
+                    + input_[..., :-2, 1:-1, 1:-1]
+                )
+                + (
+                    input_[..., 1:-1, 2:, 2:]
+                    + input_[..., 1:-1, 2:, :-2]
+                    + input_[..., 1:-1, :-2, 2:]
+                    + input_[..., 1:-1, :-2, :-2]
+                    + input_[..., 2:, 1:-1, 2:]
+                    + input_[..., 2:, 1:-1, :-2]
+                    + input_[..., :-2, 1:-1, 2:]
+                    + input_[..., :-2, 1:-1, :-2]
+                    + input_[..., 2:, 2:, 1:-1]
+                    + input_[..., 2:, :-2, 1:-1]
+                    + input_[..., :-2, 2:, 1:-1]
+                    + input_[..., :-2, :-2, 1:-1]
+                )
+                - (24 * input_[..., 1:-1, 1:-1, 1:-1])
+            )
+            / 6.0
+            / (dx * dx),
+            pad=(1, 1, 1, 1, 1, 1),
+            mode="constant",
+            value=0,
+        )
+
+        return output_
+
     def collision(
         self,
         dx: float,
@@ -154,16 +338,11 @@ class LBMCollision3d(AbstractLBMCollision):
         Returns:
             torch.Tensor: f after streaming [B, Q, res]
         """
-        dim = 3
         tau = self._tau
 
         feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=force)
 
         collision_f = (1.0 - 1.0 / tau) * f + feq / tau
-        f_new = torch.where(
-            flags == int(CellType.OBSTACLE),
-            f,
-            collision_f
-        )
+        f_new = torch.where(flags == int(CellType.OBSTACLE), f, collision_f)
 
         return f_new

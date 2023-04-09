@@ -11,20 +11,60 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType
+from src.LBM.utils import mkdir, save_img, CellType, export_asset, get_staggered
 from tqdm import tqdm
+
+from renderutils import SoftRenderer
+import mcubes
+
+
+def save_image(renderer, phi, filename, res, dx):
+    phi = F.pad(
+        phi[..., 1:-1, 1:-1, 1:-1],
+        pad=(1, 1, 1, 1, 1, 1),
+        mode="constant",
+        value=phi.min().item(),
+    )
+
+    device = phi.device
+    verts, faces = mcubes.marching_cubes(
+        ((phi * (2.0 / max(res) / dx)).cpu().numpy()[0, 0, ...]), 0
+    )
+    verts = torch.from_numpy(verts).to(device).to(torch.float32)
+    faces = torch.from_numpy(faces.astype(np.int)).to(device).to(torch.int)
+    verts = (verts - torch.Tensor(res).to(device) / 2.0) * (2.0 / max(res))
+    textures = torch.cat(
+        (
+            0.68
+            * torch.ones(1, faces.shape[-2], 2, 1, dtype=torch.float32, device=device),
+            0.68
+            * torch.ones(1, faces.shape[-2], 2, 1, dtype=torch.float32, device=device),
+            0.68
+            * torch.ones(1, faces.shape[-2], 2, 1, dtype=torch.float32, device=device),
+        ),
+        dim=-1,
+    )
+    target_image = renderer.forward(verts.unsqueeze(0), faces.unsqueeze(0), textures)
+    imageio.imwrite(
+        filename,
+        (target_image[0].permute(1, 2, 0).detach().cpu().numpy() * 255).astype(
+            np.uint8
+        ),
+    )
+
+    return [verts, faces]
 
 
 def main(
-    res: List[int] = [130, 130],
+    res: List[int] = [130, 130, 130],
     total_steps: int = 350,
     dt: float = 1.0,
     dx: float = 1.0,
     mag_strength: float = 1.0,
     gravity_strength: float = 0.0001,
 ):
-    dim = 2
-    Q = 9
+    dim = 3
+    Q = 19
 
     density_gas = 0.02381
     density_fluid = 0.2508
@@ -35,7 +75,7 @@ def main(
 
     kappa = 0.01  # sigma / Ia
 
-    tau_f = 0.7  # 0.5 + vis / cs2
+    tau_f = 0.68  # 0.5 + vis / cs2
     tau_g = tau_f
 
     # dimension of the
@@ -57,7 +97,7 @@ def main(
         dt=dt,
         density_gas=density_gas,
         density_fluid=density_fluid,
-        contact_angle=torch.Tensor([0.75 * math.pi]).to(device).to(dtype),
+        contact_angle=torch.Tensor([0.5 * math.pi]).to(device).to(dtype),
         Q=Q,
         rho_gas=rho_gas,
         rho_fluid=rho_fluid,
@@ -90,28 +130,64 @@ def main(
     collision.set_gravity(gravity=gravity_strength)
     mgf = simulationRunner.create_LBM_magnetic()
 
+    eye = torch.Tensor([1.6, 0.0, 0.0]).to(device)  # z, y, x
+    look_at = torch.Tensor([-1.0 / math.sqrt(2.0), 0.0, -1.0 / math.sqrt(2.0)]).to(
+        device
+    )
+    renderer = SoftRenderer(
+        camera_mode="look_at",
+        eye=eye,
+        camera_direction=look_at,
+        near=1.0,
+        bg_color=torch.Tensor([1.0, 1.0, 1.0]).to(device),
+        device=device,
+    )
+
     # initialize the domain
-    # wall = ["xXyY"]
+    # wall = ["xXyYzZ"]
     flags[...] = int(CellType.FLUID)
     flags = F.pad(
-        flags[..., 1:-1, 1:-1],
-        pad=(1, 1, 1, 1),
+        flags[..., 1:-1, 1:-1, 1:-1],
+        pad=(1, 1, 1, 1, 1, 1),
         mode="constant",
         value=int(CellType.OBSTACLE),
     )
-    # magnetic_wall = ["xX  "]
+    # magnetic_wall = ["xXyYzZ"]
     magnetic_flags[...] = int(CellType.OBSTACLE)
-    magnetic_flags[..., :, 1:-1] = int(CellType.FLUID)
+    magnetic_flags[..., 1:-1, 1:-1, 1:-1] = int(CellType.FLUID)
 
     path = pathlib.Path(__file__).parent.absolute()
-    mkdir(f"{path}/demo_data_LBM_{dim}d_Rosensweig_instability_mag{int(mag_strength)}/")
+    mkdir(f"{path}/demo_data_LBM_{dim}d_two_droplets_mag{int(mag_strength)}/")
     fileList = []
 
     # create a droplet
-    rho[..., : int(0.45 * res[1]), :] = rho_fluid
-    rho[..., int(0.45 * res[1]) :, :] = rho_gas
-    density[..., : int(0.45 * res[1]), :] = density_fluid
-    density[..., int(0.45 * res[1]) :, :] = density_gas
+    rho[...] = rho_gas
+    density[...] = density_gas
+    radius = min(res) // 4
+    rho[
+        ...,
+        res[0] // 2 - radius : res[0] // 2 + radius,
+        res[1] // 2 - radius : res[1] // 2 + radius,
+        int(3 * res[2] / 8) - radius : int(3 * res[2] / 8) + radius,
+    ] = rho_fluid
+    density[
+        ...,
+        res[0] // 2 - radius : res[0] // 2 + radius,
+        res[1] // 2 - radius : res[1] // 2 + radius,
+        int(3 * res[2] / 8) - radius : int(3 * res[2] / 8) + radius,
+    ] = density_fluid
+    rho[
+        ...,
+        res[0] // 2 - radius : res[0] // 2 + radius,
+        res[1] // 2 - radius : res[1] // 2 + radius,
+        int(5 * res[2] / 8) - radius : int(5 * res[2] / 8) + radius,
+    ] = rho_fluid
+    density[
+        ...,
+        res[0] // 2 - radius : res[0] // 2 + radius,
+        res[1] // 2 - radius : res[1] // 2 + radius,
+        int(5 * res[2] / 8) - radius : int(5 * res[2] / 8) + radius,
+    ] = density_fluid
     rho[flags == int(CellType.OBSTACLE)] = rho_wall
     density[flags == int(CellType.OBSTACLE)] = density_wall
     pressure = macro.get_pressure(dx=dx, dt=dt, density=density)
@@ -120,13 +196,9 @@ def main(
         dx=dx, dt=dt, rho=density, vel=vel, pressure=pressure, force=force, feq=f
     )
 
-    H_ext_mac = [
-        torch.zeros((batch_size, 1, res[0], res[1] + 1)).to(device).to(dtype),
-        mag_strength
-        * torch.ones((batch_size, 1, res[0] + 1, res[1])).to(device).to(dtype),
-    ]
     H_ext_const_real = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     H_ext_const_real[:, 1, ...] = mag_strength
+    H_ext_mac = get_staggered(H_ext_const_real)
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
@@ -183,15 +255,16 @@ def main(
         if step % 10 == 0:
             filename = str(
                 path
-            ) + "/demo_data_LBM_{}d_Rosensweig_instability_mag{}/{:03}.png".format(
+            ) + "/demo_data_LBM_{}d_two_droplets_mag{}/{:03}.png".format(
                 dim, int(mag_strength), step + 1
             )
-            save_img(density[..., 1:-1, 1:-1], filename=filename)
+            # save_img(density[..., 1:-1, 1:-1, 1:-1], filename=filename)
+            save_image(renderer, phi, filename, res, dx)
             fileList.append(filename)
 
     #  VIDEO Loop
     writer = imageio.get_writer(
-        f"{path}/{dim}d_LBM_Rosensweig_instability_mg{int(mag_strength)}.mp4", fps=25
+        f"{path}/{dim}d_LBM_two_droplets_mg{int(mag_strength)}.mp4", fps=25
     )
 
     for im in fileList:
@@ -208,14 +281,14 @@ if __name__ == "__main__":
         "--res",
         type=int,
         nargs="+",
-        default=[130, 130],
+        default=[98, 98, 384],
         help="Simulation size of the current simulation currently only square",
     )
 
     parser.add_argument(
         "--total_steps",
         type=int,
-        default=2000,
+        default=2450,
         help="For how many step to run the simulation",
     )
 
@@ -243,7 +316,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gravity_strength",
         type=float,
-        default=0.0001,
+        default=0,
         help=("Gravity Strength"),
     )
 

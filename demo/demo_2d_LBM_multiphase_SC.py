@@ -1,4 +1,4 @@
-import sys, os
+import sys
 import numpy as np
 import pathlib
 import torch
@@ -11,7 +11,7 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType
+from src.LBM.utils import mkdir, save_img, CellType, KBCType
 from tqdm import tqdm
 
 
@@ -26,11 +26,10 @@ def main(
 
     density_gas = 0.02381
     density_fluid = 0.2508
+    density_wall = 0.2508
     rho_gas = 0.02381
     rho_fluid = 0.2508
-
-    c = dx / dt
-    cs2 = c * c / 3.0
+    rho_wall = 0.02381
 
     kappa = 0.1  # sigma / Ia
 
@@ -63,7 +62,7 @@ def main(
         kappa=kappa,
         tau_g=tau_g,
         tau_f=tau_f,
-        k=0.33
+        k=0.33,
     )
 
     # create a simulation runner
@@ -80,17 +79,22 @@ def main(
     # create external force, advection and pressure projection
     prop = simulationRunner.create_propagation()
     macro = simulationRunner.create_macro_compute()
-    collision = simulationRunner.create_collision_HCZ()
-    collision.preset_KBC(dx=dx, dt=dt)
+    collision = simulationRunner.create_collision_SC()
+    # collision.preset_KBC(dx=dx, dt=dt)
     collision.set_gravity(gravity=0)
 
     # initialize the domain
-    wall = ["xXyY"]
+    # wall = ["xXyY"]
     flags[...] = int(CellType.FLUID)
-    flags = F.pad(flags[..., 1:-1, 1:-1], pad=(1, 1, 1, 1), mode="constant", value=int(CellType.OBSTACLE))
-    
+    flags = F.pad(
+        flags[..., 1:-1, 1:-1],
+        pad=(1, 1, 1, 1),
+        mode="constant",
+        value=int(CellType.OBSTACLE),
+    )
+
     path = pathlib.Path(__file__).parent.absolute()
-    mkdir(f"{path}/demo_data_LBM_{dim}d_multiphase/")
+    mkdir(f"{path}/demo_data_LBM_{dim}d_multiphase_SC/")
     fileList = []
 
     # create a droplet
@@ -103,35 +107,42 @@ def main(
             else:
                 rho[..., j, i] = rho_gas
                 density[..., j, i] = density_gas
-    pressure = macro.get_pressure(dx=dx, dt=dt, density=density)
+    rho[flags == int(CellType.OBSTACLE)] = rho_wall
+    density[flags == int(CellType.OBSTACLE)] = density_wall
     f = collision.get_feq_(dx=dx, dt=dt, rho=density, vel=vel, force=force)
-    g = collision.get_geq_(dx=dx, dt=dt, rho=density, vel=vel, pressure=pressure, force=force, feq=f)
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
-        g = prop.propagation(f=g)
 
-        rho, vel, density = macro.macro_compute(dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density)
+        rho, vel, density = macro.macro_compute(
+            dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density
+        )
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
-        g = prop.rebounce_obstacle(f=g, flags=flags)
 
-        rho, vel, density, pressure, force, dfai, dprho = collision.capillary_process(
-            rho=rho, vel=vel, flags=flags, force=force, dt=dt, dx=dx, g=g, density=density, pressure=pressure
-        )
-        f, g = collision.collision(
-            dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, force=force, g=g, pressure=pressure, dfai=dfai, dprho=dprho
+        f = collision.collision(
+            dx=dx,
+            dt=dt,
+            f=f,
+            rho=rho,
+            density=density,
+            vel=vel,
+            flags=flags,
+            force=force,
+            KBC_type=int(KBCType.KBC_A),
         )
 
         simulationRunner.step()
         # impl this
         if step % 10 == 0:
-            filename = str(path) + "/demo_data_LBM_{}d_multiphase/{:03}.png".format(dim, step + 1)
-            save_img(density, filename=filename)
+            filename = str(path) + "/demo_data_LBM_{}d_multiphase_SC/{:03}.png".format(
+                dim, step + 1
+            )
+            save_img(density[..., 1:-1, 1:-1], filename=filename)
             fileList.append(filename)
 
     #  VIDEO Loop
-    writer = imageio.get_writer(f"{path}/{dim}d_LBM_multiphase.mp4", fps=25)
+    writer = imageio.get_writer(f"{path}/{dim}d_LBM_multiphase_SC.mp4", fps=25)
 
     for im in fileList:
         writer.append_data(imageio.imread(im))

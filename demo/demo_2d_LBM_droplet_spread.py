@@ -1,4 +1,4 @@
-import sys, os
+import sys
 import numpy as np
 import pathlib
 import torch
@@ -27,11 +27,10 @@ def main(
 
     density_gas = 0.02381
     density_fluid = 0.2508
+    density_wall = 0.2508
     rho_gas = 0.02381
     rho_fluid = 0.2508
-
-    c = dx / dt
-    cs2 = c * c / 3.0
+    rho_wall = 0.2508
 
     kappa = 0.1  # sigma / Ia
 
@@ -64,7 +63,7 @@ def main(
         kappa=kappa,
         tau_g=tau_g,
         tau_f=tau_f,
-        k=0.33
+        k=0.33,
     )
 
     # create a simulation runner
@@ -85,10 +84,15 @@ def main(
     collision.set_gravity(gravity=gravity_strength)
 
     # initialize the domain
-    wall = ["xXyY"]
+    # wall = ["xXyY"]
     flags[...] = int(CellType.FLUID)
-    flags = F.pad(flags[..., 1:-1, 1:-1], pad=(1, 1, 1, 1), mode="constant", value=int(CellType.OBSTACLE))
-    
+    flags = F.pad(
+        flags[..., 1:-1, 1:-1],
+        pad=(1, 1, 1, 1),
+        mode="constant",
+        value=int(CellType.OBSTACLE),
+    )
+
     path = pathlib.Path(__file__).parent.absolute()
     mkdir(f"{path}/demo_data_LBM_{dim}d_droplet_spread/")
     fileList = []
@@ -97,37 +101,66 @@ def main(
     sphere_radius = 0.4 * max(res) / 2
     for j in range(res[0]):
         for i in range(res[1]):
-            if j * j + (i - res[1] / 2) * (i - res[1] / 2) <= sphere_radius * sphere_radius:
+            if (
+                j * j + (i - res[1] / 2) * (i - res[1] / 2)
+                <= sphere_radius * sphere_radius
+            ):
                 rho[..., j, i] = rho_fluid
                 density[..., j, i] = density_fluid
             else:
                 rho[..., j, i] = rho_gas
                 density[..., j, i] = density_gas
+    rho[flags == int(CellType.OBSTACLE)] = rho_wall
+    density[flags == int(CellType.OBSTACLE)] = density_wall
     pressure = macro.get_pressure(dx=dx, dt=dt, density=density)
     f = collision.get_feq_(dx=dx, dt=dt, rho=density, vel=vel, force=force)
-    g = collision.get_geq_(dx=dx, dt=dt, rho=density, vel=vel, pressure=pressure, force=force, feq=f)
+    g = collision.get_geq_(
+        dx=dx, dt=dt, rho=density, vel=vel, pressure=pressure, force=force, feq=f
+    )
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
         g = prop.propagation(f=g)
 
-        rho, vel, density = macro.macro_compute(dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density)
+        rho, vel, density = macro.macro_compute(
+            dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density
+        )
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
         g = prop.rebounce_obstacle(f=g, flags=flags)
 
         rho, vel, density, pressure, force, dfai, dprho = collision.capillary_process(
-            rho=rho, vel=vel, flags=flags, force=force, dt=dt, dx=dx, g=g, density=density, pressure=pressure
+            rho=rho,
+            vel=vel,
+            flags=flags,
+            force=force,
+            dt=dt,
+            dx=dx,
+            g=g,
+            density=density,
+            pressure=pressure,
         )
         f, g = collision.collision(
-            dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, force=force, g=g, pressure=pressure, dfai=dfai, dprho=dprho
+            dx=dx,
+            dt=dt,
+            f=f,
+            rho=rho,
+            vel=vel,
+            flags=flags,
+            force=force,
+            g=g,
+            pressure=pressure,
+            dfai=dfai,
+            dprho=dprho,
         )
 
         simulationRunner.step()
         # impl this
         if step % 10 == 0:
-            filename = str(path) + "/demo_data_LBM_{}d_droplet_spread/{:03}.png".format(dim, step + 1)
-            save_img(density, filename=filename)
+            filename = str(path) + "/demo_data_LBM_{}d_droplet_spread/{:03}.png".format(
+                dim, step + 1
+            )
+            save_img(density[..., 1:-1, 1:-1], filename=filename)
             fileList.append(filename)
 
     #  VIDEO Loop
@@ -176,9 +209,7 @@ if __name__ == "__main__":
         "--gravity_strength",
         type=float,
         default=0.0,
-        help=(
-            "Gravity Strength"
-        ),
+        help=("Gravity Strength"),
     )
 
     opt = vars(parser.parse_args())

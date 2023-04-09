@@ -67,23 +67,38 @@ class KBCType(Enum):
 
     def __int__(self):
         return self.value
-    
+
     @staticmethod
     def is_KBC(input: int) -> bool:
+        if input is None:
+            return False
+
         return (input & 0b10000000) > 0
-    
+
     @staticmethod
     def is_KBC_AC(input: int) -> bool:
+        if input is None:
+            return False
+
         return (input & 0b10000001) > 0
-    
+
     @staticmethod
     def is_KBC_BD(input: int) -> bool:
+        if input is None:
+            return False
+
         return (input & 0b10000010) > 0
-    
+
     @staticmethod
     def is_KBC_AB(input: int) -> bool:
+        if input is None:
+            return False
+
         return (input & 0b10000100) > 0
-    
+
     @staticmethod
     def is_KBC_CD(input: int) -> bool:
+        if input is None:
+            return False
+
         return (input & 0b10001000) > 0

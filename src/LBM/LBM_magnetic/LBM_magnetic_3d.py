@@ -20,7 +20,7 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
         density_gas: float = 0.038,
         rho_liquid: float = 0.265,
         rho_gas: float = 0.038,
-        kappa: float =  0.08,
+        kappa: float = 0.08,
         tau_f: float = 0.7,
         tau_g: float = 0.7,
         contact_angle: float = math.pi / 2.0,
@@ -46,48 +46,82 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
         self.device = device
         self.dtype = dtype
 
-        self._weight = torch.Tensor(
-            [1.0 / 3.0,
-            1.0 / 18.0, 1.0 / 18.0, 1.0 / 18.0, 1.0 / 18.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0,
-            1.0 / 18.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0,
-            1.0 / 18.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0]
-        ).reshape(1, Q, 1, 1, 1).to(self.device).to(self.dtype)
+        self._weight = (
+            torch.Tensor(
+                [
+                    1.0 / 3.0,
+                    1.0 / 18.0,
+                    1.0 / 18.0,
+                    1.0 / 18.0,
+                    1.0 / 18.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 18.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 18.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                ]
+            )
+            .reshape(1, Q, 1, 1, 1)
+            .to(self.device)
+            .to(self.dtype)
+        )
 
         # x, y, z direction
-        self._e = torch.Tensor(
-            [[0, 0, 0],
-            [1, 0, 0], [0, 1, 0], [-1, 0, 0], [0, -1, 0],
-            [1, 1, 0], [-1, 1, 0], [-1, -1, 0], [1, -1, 0],
-            [0, 0, 1],
-            [1, 0, 1], [0, 1, 1], [-1, 0, 1], [0, -1, 1],
-            [0, 0, -1],
-            [1, 0, -1], [0, 1, -1], [-1, 0, -1], [0, -1, -1]]
-        ).reshape(1, Q, 3, 1, 1, 1).to(self.device).to(torch.int64)
-    
+        self._e = (
+            torch.Tensor(
+                [
+                    [0, 0, 0],
+                    [1, 0, 0],
+                    [0, 1, 0],
+                    [-1, 0, 0],
+                    [0, -1, 0],
+                    [1, 1, 0],
+                    [-1, 1, 0],
+                    [-1, -1, 0],
+                    [1, -1, 0],
+                    [0, 0, 1],
+                    [1, 0, 1],
+                    [0, 1, 1],
+                    [-1, 0, 1],
+                    [0, -1, 1],
+                    [0, 0, -1],
+                    [1, 0, -1],
+                    [0, 1, -1],
+                    [-1, 0, -1],
+                    [0, -1, -1],
+                ]
+            )
+            .reshape(1, Q, 3, 1, 1, 1)
+            .to(self.device)
+            .to(torch.int64)
+        )
+
     def get_heq_(self, psi: torch.Tensor) -> torch.Tensor:
         """
         poisson equation solver requires a different feq solver,
         which can be referred by Chai et al, 2007. (e.q. 2.2)
         https://www.sciencedirect.com/science/article/pii/S0307904X07001722
         """
-        Q = self._Q
-
         heq = psi * self._weight  # [B, Q, *res]
         heq[:, 0:1, ...] = heq[:, 0:1, ...] - psi
 
         return heq
-    
+
     def smooth_phi(self, phi: torch.Tensor, eps: float) -> torch.Tensor:
-        result = (phi > eps) * 1.0 + (torch.abs(phi) <= eps) * \
-                  (0.5 +
-                   (0.5 / eps) * phi +
-                   (0.5 / np.pi) * torch.sin((np.pi / eps) * phi)
-                   )
+        result = (phi > eps) * 1.0 + (torch.abs(phi) <= eps) * (
+            0.5 + (0.5 / eps) * phi + (0.5 / np.pi) * torch.sin((np.pi / eps) * phi)
+        )
         return result
-    
+
     def get_H_int(
         self,
         dt: float,
@@ -95,7 +129,7 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
         phi: torch.Tensor,
         flags: torch.Tensor,
         H_ext_mac: List[torch.Tensor],
-        h: torch.Tensor
+        h: torch.Tensor,
     ) -> List[torch.Tensor]:
         """
         A poisson equation will be solved carefully.
@@ -123,12 +157,16 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
         psi = h[:, 1:, ...].sum(dim=1).unsqueeze(1) / (
             1.0 - self._weight[:, 0:1, ...]
         )  # [B, 1, *res]
-        
-        H_int = -LBMCollisionHCZ3d.get_grad(input_=psi, dx=dx)
+
+        H_int = -LBMCollisionHCZ3d.get_grad(input_=psi, dx=dx, flags=flags)
 
         # collision step
         heq = self.get_heq_(psi=psi)
-        phi_mac_x, phi_mac_y, phi_mac_z = get_staggered_x(phi), get_staggered_y(phi), get_staggered_z(phi)
+        phi_mac_x, phi_mac_y, phi_mac_z = (
+            get_staggered_x(phi),
+            get_staggered_y(phi),
+            get_staggered_z(phi),
+        )
         H_ext_mac_x, H_ext_mac_y, H_ext_mac_z = H_ext_mac
         chi_mac_x = k * (self.smooth_phi(phi=phi_mac_x, eps=0.1 * dx))
         chi_mac_y = k * (self.smooth_phi(phi=phi_mac_y, eps=0.1 * dx))
@@ -137,14 +175,12 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
         chi_H_ext_mac_y = chi_mac_y * H_ext_mac_y
         chi_H_ext_mac_z = chi_mac_z * H_ext_mac_z
         rhs = (
-            (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1]) +
-            (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :]) +
-            (chi_H_ext_mac_z[..., 1:, :, :] - chi_H_ext_mac_z[..., :-1, :, :])
+            (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1])
+            + (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
+            + (chi_H_ext_mac_z[..., 1:, :, :] - chi_H_ext_mac_z[..., :-1, :, :])
         ) / dx
         # only count where there is fluid
-        rhs = torch.where(
-            flags == int(CellType.FLUID), rhs, torch.zeros_like(rhs)
-        )
+        rhs = torch.where(flags == int(CellType.FLUID), rhs, torch.zeros_like(rhs))
         add_h = dt * weight_bar * rhs * (cs2 * (0.5 - tau) * dt)
         new_h = (1.0 - 1.0 / tau) * h + (1.0 / tau) * heq + add_h
 

@@ -17,7 +17,7 @@ class LBMCollision2d(AbstractLBMCollision):
         density_gas: float = 0.038,
         rho_liquid: float = 0.265,
         rho_gas: float = 0.038,
-        kappa: float =  0.08,
+        kappa: float = 0.08,
         tau_f: float = 0.7,
         tau_g: float = 0.7,
         contact_angle: float = math.pi / 2.0,
@@ -43,25 +43,73 @@ class LBMCollision2d(AbstractLBMCollision):
         self.device = device
         self.dtype = dtype
 
-        self._weight = torch.Tensor(
-            [4.0 / 9.0,
-            1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0]
-        ).reshape(1, Q, 1, 1).to(self.device).to(self.dtype)
+        self._weight = (
+            torch.Tensor(
+                [
+                    4.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                ]
+            )
+            .reshape(1, Q, 1, 1)
+            .to(self.device)
+            .to(self.dtype)
+        )
 
         # x, y direction
-        self._e = torch.Tensor(
-            [[0, 0],
-            [1, 0], [0, 1], [-1, 0], [0, -1],
-            [1, 1], [-1, 1], [-1, -1], [1, -1]]
-        ).reshape(1, Q, 2, 1, 1).to(self.device).to(torch.int64)
-    
+        self._e = (
+            torch.Tensor(
+                [
+                    [0, 0],
+                    [1, 0],
+                    [0, 1],
+                    [-1, 0],
+                    [0, -1],
+                    [1, 1],
+                    [-1, 1],
+                    [-1, -1],
+                    [1, -1],
+                ]
+            )
+            .reshape(1, Q, 2, 1, 1)
+            .to(self.device)
+            .to(torch.int64)
+        )
+
+    def equation_of_states(self, dx: float, dt: float, rho: torch.Tensor):
+        c = dx / dt
+        cs2 = c * c / 3.0
+        RT = cs2
+        a = 12.0 * RT
+        b = 4.0
+
+        temp_rho = b * rho / 4.0
+        pressure = (
+            rho
+            * RT
+            * (4.0 * temp_rho - 2.0 * temp_rho * temp_rho)
+            / torch.pow(1.0 - temp_rho, 3)
+            + rho * RT
+            - a * rho * rho
+        )
+
+        return pressure
+
     def set_gravity(self, gravity: float):
         dim = 2
-        self._gravity = torch.Tensor(
-            [0.0, -gravity]
-        ).reshape(1, dim, *([1] * dim)).to(self.device).to(self.dtype)
-    
+        self._gravity = (
+            torch.Tensor([0.0, -gravity])
+            .reshape(1, dim, *([1] * dim))
+            .to(self.device)
+            .to(self.dtype)
+        )
+
     def get_feq_(
         self,
         dx: float,
@@ -70,20 +118,30 @@ class LBMCollision2d(AbstractLBMCollision):
         vel: torch.Tensor,
         force: torch.Tensor = None,
     ) -> torch.Tensor:
-        dim = 2
         tau = self._tau
         if force is not None:
             vel = vel + tau * force / rho
-        
+
         c = dx / dt
-        cs2 = c * c / 3.0
 
         temp_val = torch.sqrt(1.0 + 3.0 * vel * vel / c / c)
-        feq = rho * self._weight * (
-            (2.0 - temp_val[:, 0:1, ...]) *
-            (2.0 - temp_val[:, 1:2, ...]) *
-            torch.pow((2.0 * vel[:, 0:1, ...] / c + temp_val[:, 0:1, ...]) / (1.0 - vel[:, 0:1, ...] / c), self._e[:, :, 0, ...]) *
-            torch.pow((2.0 * vel[:, 1:2, ...] / c + temp_val[:, 1:2, ...]) / (1.0 - vel[:, 1:2, ...] / c), self._e[:, :, 1, ...])
+        feq = (
+            rho
+            * self._weight
+            * (
+                (2.0 - temp_val[:, 0:1, ...])
+                * (2.0 - temp_val[:, 1:2, ...])
+                * torch.pow(
+                    (2.0 * vel[:, 0:1, ...] / c + temp_val[:, 0:1, ...])
+                    / (1.0 - vel[:, 0:1, ...] / c),
+                    self._e[:, :, 0, ...],
+                )
+                * torch.pow(
+                    (2.0 * vel[:, 1:2, ...] / c + temp_val[:, 1:2, ...])
+                    / (1.0 - vel[:, 1:2, ...] / c),
+                    self._e[:, :, 1, ...],
+                )
+            )
         )
 
         # # constraint of nan
@@ -99,7 +157,7 @@ class LBMCollision2d(AbstractLBMCollision):
         # feq = rho * self._weight * (
         #     1.0 + eu / cs2 + 0.5 * eu * eu / cs2 / cs2 - 0.5 * uv / cs2
         # )
-        
+
         return feq
 
     def get_geq_(
@@ -110,157 +168,93 @@ class LBMCollision2d(AbstractLBMCollision):
         vel: torch.Tensor,
         pressure: torch.Tensor,
         force: torch.Tensor,
-        feq: torch.Tensor = None
+        feq: torch.Tensor = None,
     ) -> torch.Tensor:
         c = dx / dt
         cs2 = c * c / 3.0
         if feq is None:
             feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=force)
 
-        geq = self._weight * (
-            pressure + cs2 * rho * (
-                feq / self._weight / rho - 1.0
-            )
-        )
-        
+        geq = self._weight * (pressure + cs2 * rho * (feq / self._weight / rho - 1.0))
+
         return geq
-    
-    def KBC_postprocess(
-        self,
-        dx: float,
-        dt: float,
-        f: torch.Tensor,
-        feq: torch.Tensor,
-        rho: torch.Tensor,
-        vel: torch.Tensor,
-        KBC_type: int=int(KBCType.KBC_C)
-    ):
-        beta = 0.5 / self._tau
 
-        c = dx / dt
+    @staticmethod
+    def get_grad(input_: torch.Tensor, dx: float, flags: torch.Tensor) -> torch.Tensor:
+        if input_.shape[1] != 1:
+            raise RuntimeError("To get your grad operation, channel dim has to be 1")
 
-        moment = torch.zeros((*rho.shape, 3, 3)).to(rho.device).to(rho.dtype)
-        moment_eq = torch.zeros((*rho.shape, 3, 3)).to(rho.device).to(rho.dtype)
-        if KBC_type == int(KBCType.KBC_C) or KBC_type == int(KBCType.KBC_D):
-            moment = (
-                self.C_mat * f.unsqueeze(-1).unsqueeze(-1)
-            ).sum(dim=1).unsqueeze(1)  # [B, 1, res, 3, 3]
-            moment_eq = (
-                self.C_mat * feq.unsqueeze(-1).unsqueeze(-1)
-            ).sum(dim=1).unsqueeze(1)  # [B, 1, res, 3, 3]
-        elif KBC_type == int(KBCType.KBC_A) or KBC_type == int(KBCType.KBC_B):
-            for i in range(3):
-                for j in range(3):
-                    temp_val =  (
-                        torch.pow(self._e[:, :, 0, ...] * c - vel[:, 0:1, ...], i) *
-                        torch.pow(self._e[:, :, 1, ...] * c - vel[:, 1:2, ...], j)
-                    )  # [B, Q, res]
-                    moment[..., i, j] = (f * temp_val).sum(dim=1).unsqueeze(1)
-                    moment_eq[..., i, j] = (feq * temp_val).sum(dim=1).unsqueeze(1)
+        dim = 2
+        pad = (1, 1, 1, 1)
 
-        # KBC - parameters
-        KBC_T = moment[..., 2, 0] + moment[..., 0, 2]
-        KBC_N = moment[..., 2, 0] - moment[..., 0, 2]
-        KBC_PIxy = moment[..., 1, 1]
-        # KBC_Qxxy = moment[..., 2, 1]
-        # KBC_Qxyy = moment[..., 1, 2]
-        # KBC_A = moment[..., 2, 2]
+        input_obs = F.pad(input_[..., 1:-1, 1:-1], pad=pad, mode="replicate")
+        input_fluid = F.pad(input_[..., 1:-1, 1:-1], pad=pad, mode="constant", value=0)
+        input_new = torch.where(flags == int(CellType.OBSTACLE), input_obs, input_fluid)
 
-        KBC_T_eq = moment_eq[..., 2, 0] + moment_eq[..., 0, 2]
-        KBC_N_eq = moment_eq[..., 2, 0] - moment_eq[..., 0, 2]
-        KBC_PIxy_eq = moment_eq[..., 1, 1]
-        # KBC_Qxxy_eq = moment_eq[..., 2, 1]
-        # KBC_Qxyy_eq = moment_eq[..., 1, 2]
-        # KBC_A_eq = moment_eq[..., 2, 2]
+        output_inner = torch.zeros_like(input_[..., 1:-1, 1:-1]).repeat(
+            1, dim, *([1] * dim)
+        )
+        output_inner[:, 0:1, ...] = (
+            (
+                4.0 * (input_new[..., 1:-1, 2:] - input_new[..., 1:-1, :-2])
+                + (
+                    input_new[..., 2:, 2:]
+                    - input_new[..., :-2, :-2]
+                    + input_new[..., :-2, 2:]
+                    - input_new[..., 2:, :-2]
+                )
+            )
+            / 12.0
+            / dx
+        )
 
-        KBC_ds = torch.zeros_like(f)
-        if KBC_type == int(KBCType.KBC_A) or KBC_type == int(KBCType.KBC_C):
-            # T, N, PI only
-            KBC_ds[:, 0:1, ...] = (
-                (1.0 - KBC_T) - (1.0 - KBC_T_eq)
-            )  # 0, 0
+        output_inner[:, 1:2, ...] = (
+            (
+                4.0 * (input_new[..., 2:, 1:-1] - input_new[..., :-2, 1:-1])
+                + (
+                    input_new[..., 2:, 2:]
+                    - input_new[..., :-2, :-2]
+                    + input_new[..., 2:, :-2]
+                    - input_new[..., :-2, 2:]
+                )
+            )
+            / 12.0
+            / dx
+        )
 
-            KBC_ds[:, 1:2, ...] = 0.5 * (
-                (0.5 * (KBC_T + KBC_N) + 1 * vel[:, 0:1, ...]) -
-                (0.5 * (KBC_T_eq + KBC_N_eq) + 1 * vel[:, 0:1, ...])
-            )  # 1, 0
-            KBC_ds[:, 3:4, ...] = 0.5 * (
-                (0.5 * (KBC_T + KBC_N) - 1 * vel[:, 0:1, ...]) -
-                (0.5 * (KBC_T_eq + KBC_N_eq) - 1 * vel[:, 0:1, ...])
-            )  # -1, 0
-            KBC_ds[:, 2:3, ...] = 0.5 * (
-                (0.5 * (KBC_T - KBC_N) + 1 * vel[:, 1:2, ...]) -
-                (0.5 * (KBC_T_eq - KBC_N_eq) + 1 * vel[:, 1:2, ...])
-            )  # 0, 1
-            KBC_ds[:, 4:5, ...] = 0.5 * (
-                (0.5 * (KBC_T - KBC_N) - 1 * vel[:, 1:2, ...]) -
-                (0.5 * (KBC_T_eq - KBC_N_eq) - 1 * vel[:, 1:2, ...])
-            )  # 0, -1
+        output = F.pad(output_inner, pad=pad, mode="replicate")
 
-            KBC_ds[:, 5:6, ...] = 0.25 * (
-                (KBC_PIxy) -
-                (KBC_PIxy_eq)
-            )  # 1, 1
-            KBC_ds[:, 6:7, ...] = 0.25 * (
-                (-KBC_PIxy) -
-                (-KBC_PIxy_eq)
-            )  # -1, 1
-            KBC_ds[:, 7:8, ...] = 0.25 * (
-                (KBC_PIxy) -
-                (KBC_PIxy_eq)
-            )  # -1, -1
-            KBC_ds[:, 8:9, ...] = 0.25 * (
-                (-KBC_PIxy) -
-                (-KBC_PIxy_eq)
-            )   # 1, -1
-        elif KBC_type ==  int(KBCType.KBC_B) or KBC_type == int(KBCType.KBC_D):
-            # N, PI only
-            KBC_ds[:, 0:1, ...] = (
-                (1.0) - (1.0)
-            )  # 0, 0
+        return output
 
-            KBC_ds[:, 1:2, ...] = 0.5 * (
-                (0.5 * (KBC_N) + 1 * vel[:, 0:1, ...]) -
-                (0.5 * (KBC_N_eq) + 1 * vel[:, 0:1, ...])
-            )  # 1, 0
-            KBC_ds[:, 3:4, ...] = 0.5 * (
-                (0.5 * (KBC_N) - 1 * vel[:, 0:1, ...]) -
-                (0.5 * (KBC_N_eq) - 1 * vel[:, 0:1, ...])
-            )  # -1, 0
-            KBC_ds[:, 2:3, ...] = 0.5 * (
-                (0.5 * (-KBC_N) + 1 * vel[:, 1:2, ...]) -
-                (0.5 * (-KBC_N_eq) + 1 * vel[:, 1:2, ...])
-            )  # 0, 1
-            KBC_ds[:, 4:5, ...] = 0.5 * (
-                (0.5 * (-KBC_N) - 1 * vel[:, 1:2, ...]) -
-                (0.5 * (-KBC_N_eq) - 1 * vel[:, 1:2, ...])
-            )  # 0, -1
+    def get_laplacian(
+        self, input_: torch.Tensor, dx: float, flags: torch.Tensor
+    ) -> torch.Tensor:
+        output_ = F.pad(
+            (
+                4.0
+                * (
+                    input_[..., 1:-1, 2:]
+                    + input_[..., 1:-1, :-2]
+                    + input_[..., 2:, 1:-1]
+                    + input_[..., :-2, 1:-1]
+                )
+                + (
+                    input_[..., 2:, 2:]
+                    + input_[..., 2:, :-2]
+                    + input_[..., :-2, 2:]
+                    + input_[..., :-2, :-2]
+                )
+                - (20 * input_[..., 1:-1, 1:-1])
+            )
+            / 5.0
+            / (dx * dx),
+            pad=(1, 1, 1, 1),
+            mode="constant",
+            value=0,
+        )
 
-            KBC_ds[:, 5:6, ...] = 0.25 * (
-                (KBC_PIxy) -
-                (KBC_PIxy_eq)
-            )  # 1, 1
-            KBC_ds[:, 6:7, ...] = 0.25 * (
-                (-KBC_PIxy) -
-                (-KBC_PIxy_eq)
-            )  # -1, 1
-            KBC_ds[:, 7:8, ...] = 0.25 * (
-                (KBC_PIxy) -
-                (KBC_PIxy_eq)
-            )  # -1, -1
-            KBC_ds[:, 8:9, ...] = 0.25 * (
-                (-KBC_PIxy) -
-                (-KBC_PIxy_eq)
-            )   # 1, -1
-        
-        KBC_dh = f - feq - KBC_ds
-        gamma_nominator = KBC_ds * KBC_dh / (feq + 1e-7)
-        gamma_determinator = KBC_dh * KBC_dh / (feq + 1e-7)
-        KBC_gamma = gamma_nominator / (gamma_determinator + 1e-7)
-        KBC_gamma = (1.0 - (2.0 * beta - 1.0) * KBC_gamma) / beta
+        return output_
 
-        return f - 2.0 * beta * KBC_ds - beta * KBC_dh * KBC_gamma
-    
     def collision(
         self,
         dx: float,
@@ -270,7 +264,7 @@ class LBMCollision2d(AbstractLBMCollision):
         vel: torch.Tensor,
         flags: torch.Tensor,
         force: torch.Tensor,
-        KBC_type: int=None
+        KBC_type: int = None,
     ) -> torch.Tensor:
         """
         Args:
@@ -284,15 +278,10 @@ class LBMCollision2d(AbstractLBMCollision):
         Returns:
             torch.Tensor: f after streaming [B, Q, res]
         """
-        dim = 2
         tau = self._tau
 
         feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=force)
         collision_f = (1.0 - 1.0 / tau) * f + feq / tau
-        f_new = torch.where(
-            flags == int(CellType.OBSTACLE),
-            f,
-            collision_f
-        )
+        f_new = torch.where(flags == int(CellType.OBSTACLE), f, collision_f)
 
         return f_new

@@ -12,7 +12,7 @@ class AbstractLBMPropagation(ABC):
     @abstractmethod
     def propagation(self, f):
         ...
-    
+
     @abstractmethod
     def rebounce_obstacle(self, f, flags):
         ...

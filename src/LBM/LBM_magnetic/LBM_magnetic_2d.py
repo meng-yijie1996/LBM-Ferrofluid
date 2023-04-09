@@ -20,7 +20,7 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
         density_gas: float = 0.038,
         rho_liquid: float = 0.265,
         rho_gas: float = 0.038,
-        kappa: float =  0.08,
+        kappa: float = 0.08,
         tau_f: float = 0.7,
         tau_g: float = 0.7,
         contact_angle: float = math.pi / 2.0,
@@ -46,40 +46,62 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
         self.device = device
         self.dtype = dtype
 
-        self._weight = torch.Tensor(
-            [4.0 / 9.0,
-            1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0, 1.0 / 9.0,
-            1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0, 1.0 / 36.0]
-        ).reshape(1, Q, 1, 1).to(self.device).to(self.dtype)
+        self._weight = (
+            torch.Tensor(
+                [
+                    4.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 9.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                    1.0 / 36.0,
+                ]
+            )
+            .reshape(1, Q, 1, 1)
+            .to(self.device)
+            .to(self.dtype)
+        )
 
         # x, y direction
-        self._e = torch.Tensor(
-            [[0, 0],
-            [1, 0], [0, 1], [-1, 0], [0, -1],
-            [1, 1], [-1, 1], [-1, -1], [1, -1]]
-        ).reshape(1, Q, 2, 1, 1).to(self.device).to(torch.int64)
-    
+        self._e = (
+            torch.Tensor(
+                [
+                    [0, 0],
+                    [1, 0],
+                    [0, 1],
+                    [-1, 0],
+                    [0, -1],
+                    [1, 1],
+                    [-1, 1],
+                    [-1, -1],
+                    [1, -1],
+                ]
+            )
+            .reshape(1, Q, 2, 1, 1)
+            .to(self.device)
+            .to(torch.int64)
+        )
+
     def get_heq_(self, psi: torch.Tensor) -> torch.Tensor:
         """
         poisson equation solver requires a different feq solver,
         which can be referred by Chai et al, 2007. (e.q. 2.2)
         https://www.sciencedirect.com/science/article/pii/S0307904X07001722
         """
-        Q = self._Q
-
         heq = psi * self._weight  # [B, Q, *res]
         heq[:, 0:1, ...] = heq[:, 0:1, ...] - psi
 
         return heq
-    
+
     def smooth_phi(self, phi: torch.Tensor, eps: float) -> torch.Tensor:
-        result = (phi > eps) * 1.0 + (torch.abs(phi) <= eps) * \
-                  (0.5 +
-                   (0.5 / eps) * phi +
-                   (0.5 / np.pi) * torch.sin((np.pi / eps) * phi)
-                   )
+        result = (phi > eps) * 1.0 + (torch.abs(phi) <= eps) * (
+            0.5 + (0.5 / eps) * phi + (0.5 / np.pi) * torch.sin((np.pi / eps) * phi)
+        )
         return result
-    
+
     def get_H_int(
         self,
         dt: float,
@@ -87,7 +109,7 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
         phi: torch.Tensor,
         flags: torch.Tensor,
         H_ext_mac: List[torch.Tensor],
-        h: torch.Tensor
+        h: torch.Tensor,
     ) -> List[torch.Tensor]:
         """
         A poisson equation will be solved carefully.
@@ -102,8 +124,6 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
         Returns:
             torch.Tensor: induced H_int: [B, dim, res]
         """
-        dim = 2
-
         # macro variables computing
         tau = self._tau
         weight_bar = self._weight
@@ -115,7 +135,7 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
             1.0 - self._weight[:, 0:1, ...]
         )  # [B, 1, *res]
 
-        H_int = -LBMCollisionHCZ2d.get_grad(input_=psi, dx=dx)
+        H_int = -LBMCollisionHCZ2d.get_grad(input_=psi, dx=dx, flags=flags)
 
         # collision step
         heq = self.get_heq_(psi=psi)
@@ -126,16 +146,15 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
         chi_H_ext_mac_x = chi_mac_x * H_ext_mac_x
         chi_H_ext_mac_y = chi_mac_y * H_ext_mac_y
         rhs = (
-            (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1]) +
-            (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
+            (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1])
+            + (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
         ) / dx
         # only count where there is fluid
-        rhs = torch.where(
-            flags == int(CellType.FLUID), rhs, torch.zeros_like(rhs)
-        )
+        rhs = torch.where(flags == int(CellType.FLUID), rhs, torch.zeros_like(rhs))
         add_h = dt * weight_bar * rhs * (cs2 * (0.5 - tau) * dt)
         new_h = (1.0 - 1.0 / tau) * h + (1.0 / tau) * heq + add_h
 
-        H_int[(flags == int(CellType.OBSTACLE)).repeat(1, dim, *([1] * dim))] = 0
+        # dim = 2
+        # H_int[(flags == int(CellType.OBSTACLE)).repeat(1, dim, *([1] * dim))] = 0
 
         return [H_int, new_h]

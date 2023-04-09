@@ -8,9 +8,13 @@ from src.LBM.utils import CellType
 class LBMPropagation3d(AbstractLBMPropagation):
     rank = 2
 
-    def __init__(self, *args, **kwargs,):
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
         super(LBMPropagation3d, self).__init__(*args, **kwargs)
-    
+
     def propagation(self, f: torch.Tensor) -> torch.Tensor:
         """
         Args:
@@ -103,7 +107,7 @@ class LBMPropagation3d(AbstractLBMPropagation):
         f_new_pad[..., 17, :-1, :, :-1] = f_pad[..., 17, 1:, :, 1:]
         # neg y, neg z
         f_new_pad[..., 18, :-1, :-1, :] = f_pad[..., 18, 1:, 1:, :]
-        
+
         return f_new_pad[..., 1:-1, 1:-1, 1:-1]
 
     def rebounce_obstacle(self, f: torch.Tensor, flags: torch.Tensor) -> torch.Tensor:
@@ -133,10 +137,6 @@ class LBMPropagation3d(AbstractLBMPropagation):
         inverted_f[:, 17, ...] = f[:, 10, ...]
         inverted_f[:, 18, ...] = f[:, 11, ...]
 
-        f_new = torch.where(
-            flags == int(CellType.OBSTACLE),
-            inverted_f,
-            f
-        )
+        f_new = torch.where(flags == int(CellType.OBSTACLE), inverted_f, f)
 
         return f_new

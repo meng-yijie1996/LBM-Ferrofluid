@@ -14,14 +14,14 @@ class SimulationParameters(object):
         density_gas: float = 0.0,
         density_fluid: float = 1.0,
         contact_angle: float = 0.75 * math.pi,
-        Q: float =  9,
-        tau: float =  1.0,
+        Q: float = 9,
+        tau: float = 1.0,
         rho_gas: float = 0.038,
         rho_fluid: float = 0.265,
         kappa: float = 0.08,
         tau_g: float = 0.7,
         tau_f: float = 0.7,
-        k: float = 1.0
+        k: float = 1.0,
     ):
         self.dim = dim
         self.dtype = dtype
@@ -51,7 +51,7 @@ class SimulationParameters(object):
         self.kappa = kappa
         self.tau_g = tau_g
         self.tau_f = tau_f
-        
+
         self.k = k  # susceptibilty
 
     def step(self):

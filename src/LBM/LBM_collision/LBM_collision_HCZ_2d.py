@@ -25,7 +25,7 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         flags: torch.Tensor,
         force: torch.Tensor,
         dt: float = 1.0,
-        dx: float  = 1.0,
+        dx: float = 1.0,
         g: torch.Tensor = None,
         density: torch.Tensor = None,
         pressure: torch.Tensor = None,
@@ -38,72 +38,80 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         c = dx / dt
         cs2 = c * c / 3.0
         RT = cs2
-        a = 12.0 * RT
-        b = 4.0
 
-        temp_rho = b * rho / 4.0
+        # Choose your mode for different boundaries
+        # prho = torch.where(
+        #     flags == int(CellType.OBSTACLE),
+        #     F.pad(
+        #         pressure[..., 1:-1, 1:-1] - RT * density[..., 1:-1, 1:-1],
+        #         pad=pad,
+        #         mode="constant",
+        #         value=0
+        #     ),
+        #     F.pad(
+        #         pressure[..., 1:-1, 1:-1],
+        #         pad=pad,
+        #         mode="replicate"
+        #     ) - RT * density,
+        # )
+        # fai = torch.where(
+        #     flags == int(CellType.OBSTACLE),
+        #     F.pad(
+        #         self.equation_of_states(dx=dx, dt=dt, rho=rho)[..., 1:-1, 1:-1] - RT * density[..., 1:-1, 1:-1],
+        #         pad=pad,
+        #         mode="constant",
+        #         value=0
+        #     ),
+        #     F.pad(
+        #         self.equation_of_states(dx=dx, dt=dt, rho=rho)[..., 1:-1, 1:-1],
+        #         pad=pad,
+        #         mode="replicate"
+        #     ) - RT * density,
+        # )
+
         prho = F.pad(
-            (
-                pressure - RT * density
-            )[..., 1:-1, 1:-1],
-            pad=pad,
-            mode="replicate"
+            (pressure - RT * density)[..., 1:-1, 1:-1], pad=pad, mode="replicate"
         )
         fai = F.pad(
-            (rho * RT * (
-                    4.0 * temp_rho - 2.0 * temp_rho * temp_rho
-                ) / torch.pow(1.0 - temp_rho, 3) - a * rho * rho
-            )[..., 1:-1, 1:-1],
+            (self.equation_of_states(dx=dx, dt=dt, rho=rho) - rho * RT)[
+                ..., 1:-1, 1:-1
+            ],
             pad=pad,
-            mode="replicate"
+            mode="replicate",
         )
 
         # ===========================
         #      Contact Angle
         # ===========================
         # 1. neg x
-        hlp_CA = torch.abs(
-            rho[..., 2:, 1] - rho[..., :-2, 1]
-        )
+        hlp_CA = torch.abs(rho[..., 2:, 1] - rho[..., :-2, 1])
         rho[..., 1:-1, 0] = torch.where(
             flags[..., 1:-1, 0] == int(CellType.OBSTACLE),
-            rho[..., 1:-1, 2] + torch.tan(
-                math.pi / 2.0 - self._contact_angle
-            ) * hlp_CA,
-            rho[..., 1:-1, 0]
+            rho[..., 1:-1, 2] + torch.tan(math.pi / 2.0 - self._contact_angle) * hlp_CA,
+            rho[..., 1:-1, 0],
         )
         # 2. pos x
-        hlp_CA = torch.abs(
-            rho[..., 2:, -2] - rho[..., :-2, -2]
-        )
+        hlp_CA = torch.abs(rho[..., 2:, -2] - rho[..., :-2, -2])
         rho[..., 1:-1, -1] = torch.where(
             flags[..., 1:-1, -1] == int(CellType.OBSTACLE),
-            rho[..., 1:-1, -3] + torch.tan(
-                math.pi / 2.0 - self._contact_angle
-            ) * hlp_CA,
-            rho[..., 1:-1, -1]
+            rho[..., 1:-1, -3]
+            + torch.tan(math.pi / 2.0 - self._contact_angle) * hlp_CA,
+            rho[..., 1:-1, -1],
         )
-         # 3. neg y
-        hlp_CA = torch.abs(
-            rho[..., 1, 2:] - rho[..., 1, :-2]
-        )
+        # 3. neg y
+        hlp_CA = torch.abs(rho[..., 1, 2:] - rho[..., 1, :-2])
         rho[..., 0, 1:-1] = torch.where(
             flags[..., 0, 1:-1] == int(CellType.OBSTACLE),
-            rho[..., 2, 1:-1] + torch.tan(
-                math.pi / 2.0 - self._contact_angle
-            ) * hlp_CA,
-            rho[..., 0, 1:-1]
+            rho[..., 2, 1:-1] + torch.tan(math.pi / 2.0 - self._contact_angle) * hlp_CA,
+            rho[..., 0, 1:-1],
         )
         # 4.pos y
-        hlp_CA = torch.abs(
-            rho[..., -2, 2:] - rho[..., -2, :-2]
-        )
+        hlp_CA = torch.abs(rho[..., -2, 2:] - rho[..., -2, :-2])
         rho[..., -1, 1:-1] = torch.where(
             flags[..., -1, 1:-1] == int(CellType.OBSTACLE),
-            rho[..., -3, 1:-1] + torch.tan(
-                math.pi / 2.0 - self._contact_angle
-            ) * hlp_CA,
-            rho[..., -1, 1:-1]
+            rho[..., -3, 1:-1]
+            + torch.tan(math.pi / 2.0 - self._contact_angle) * hlp_CA,
+            rho[..., -1, 1:-1],
         )
 
         # 5. edge points
@@ -119,113 +127,57 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         # ===========================
         #      Laplacian of density
         # ===========================
-        laplacian_density = self.get_laplacian(input_=density, dx=dx)
+        laplacian_density = self.get_laplacian(input_=density, dx=dx, flags=flags)
 
         # ===========================
         #      Get your forces
         # ===========================
-        force = self._kappa * density * LBMCollisionHCZ2d.get_grad(input_=laplacian_density, dx=dx)
+        force = (
+            self._kappa
+            * density
+            * LBMCollisionHCZ2d.get_grad(input_=laplacian_density, dx=dx, flags=flags)
+        )
         force += self._gravity * density
         if H2 is not None:
             mu0 = 4 * math.pi * 1e-7
             k = 0.33
             chi = k * (self.smooth_phi(phi=phi, eps=0.1 * dx))
-            force += -0.5 * mu0 * H2 * LBMCollisionHCZ2d.get_grad(input_=chi, dx=dx)
-        dfai = LBMCollisionHCZ2d.get_grad(input_=fai, dx=dx)
-        dprho = LBMCollisionHCZ2d.get_grad(input_=prho, dx=dx)
+            force += (
+                -0.5
+                * mu0
+                * H2
+                * LBMCollisionHCZ2d.get_grad(input_=chi, dx=dx, flags=flags)
+            )
+        dfai = LBMCollisionHCZ2d.get_grad(input_=fai, dx=dx, flags=flags)
+        dprho = LBMCollisionHCZ2d.get_grad(input_=prho, dx=dx, flags=flags)
 
         # ===========================
         #      Get your real macro-varaibles (besides from velocity)
         # ===========================
         macro_vel = (
-            (
-                (g.unsqueeze(2) * self._e).sum(dim=1) * c +
-                0.5 * dt * RT * force
-            )
-        ) / RT / density  # [B, dim, res]
+            (((g.unsqueeze(2) * self._e).sum(dim=1) * c + 0.5 * dt * RT * force))
+            / RT
+            / density
+        )  # [B, dim, res]
         vel = torch.where(
-            (flags == int(CellType.FLUID)).repeat(1, dim, *([1] * dim)),
-            macro_vel,
-            vel
+            (flags == int(CellType.FLUID)).repeat(1, dim, *([1] * dim)), macro_vel, vel
         )
 
-        macro_pressure = (
-            g.sum(dim=1).unsqueeze(1) -
-            0.5 * dt * (vel * dprho).sum(dim=1).unsqueeze(1)
+        macro_pressure = g.sum(dim=1).unsqueeze(1) - 0.5 * dt * (vel * dprho).sum(
+            dim=1
+        ).unsqueeze(
+            1
         )  # [B, 1, res]
-        pressure = torch.where(
-            flags == int(CellType.FLUID),
-            macro_pressure,
-            pressure
-        )
+        pressure = torch.where(flags == int(CellType.FLUID), macro_pressure, pressure)
 
         return [rho, vel, density, pressure, force, dfai, dprho]
-    
+
     def smooth_phi(self, phi: torch.Tensor, eps: float) -> torch.Tensor:
-        result = (phi > eps) * 1.0 + (torch.abs(phi) <= eps) * \
-                  (0.5 +
-                   (0.5 / eps) * phi +
-                   (0.5 / np.pi) * torch.sin((np.pi / eps) * phi)
-                   )
+        result = (phi > eps) * 1.0 + (torch.abs(phi) <= eps) * (
+            0.5 + (0.5 / eps) * phi + (0.5 / np.pi) * torch.sin((np.pi / eps) * phi)
+        )
         return result
-    
-    def get_laplacian(self, input_: torch.Tensor, dx: float) -> torch.Tensor:
-        output_ = F.pad(
-            (
-                4.0 * (
-                    input_[..., 1:-1, 2:] + input_[..., 1:-1, :-2] +
-                    input_[..., 2:, 1:-1] + input_[..., :-2, 1:-1]
-                ) + 
-                (
-                    input_[..., 2:, 2:] + input_[..., 2:, :-2] +
-                    input_[..., :-2, 2:] + input_[..., :-2, :-2]
-                ) -
-                (
-                    20 * input_[..., 1:-1, 1:-1]
-                )
-            ) / 5.0 / (dx * dx),
-            pad=(1, 1, 1, 1),
-            mode="constant",
-            value=0
-        )
 
-        return output_
-    
-    @staticmethod
-    def get_grad(input_: torch.Tensor, dx: float) -> torch.Tensor:
-        if input_.shape[1] != 1:
-            raise RuntimeError("To get your grad operation, channel dim has to be 1")
-        
-        dim = 2
-        pad = (1, 1, 1, 1)
-
-        output = torch.zeros_like(input_[..., 1:-1, 1:-1]).repeat(1, 2, 1, 1)
-        output[:, 0:1, ...] = (
-            4.0 * (
-                input_[..., 1:-1, 2:] - input_[..., 1:-1, :-2]
-            ) +
-            (
-                input_[..., 2:, 2:] - input_[..., :-2, :-2] +
-                input_[..., :-2, 2:] - input_[..., 2:, :-2]
-            )
-        ) / 12.0 / dx
-
-        output[:, 1:2, ...] = (
-            4.0 * (
-                input_[..., 2:, 1:-1] - input_[..., :-2, 1:-1]
-            ) +
-            (
-                input_[..., 2:, 2:] - input_[..., :-2, :-2] +
-                input_[..., 2:, :-2] - input_[..., :-2, 2:]
-            )
-        ) / 12.0 / dx
-
-        output_pad = F.pad(
-            output, pad=pad, mode="replicate"
-        )
-
-        return output_pad
-    
     def compute_Gamma(self, dx: float, dt: float, vel: torch.Tensor):
         c = dx / dt
         cs2 = c * c / 3.0
@@ -237,7 +189,7 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         )
 
         return Gamma
-    
+
     def collision(
         self,
         dx: float,
@@ -251,7 +203,7 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         pressure: torch.Tensor = None,
         dfai: torch.Tensor = None,
         dprho: torch.Tensor = None,
-        KBC_type: int = None
+        KBC_type: int = None,
     ) -> List[torch.Tensor]:
         """
         Args:
@@ -265,7 +217,6 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         Returns:
             torch.Tensor: f after streaming [B, Q, res]
         """
-        dim = 2
         tau_f = self._tau_f
         tau_g = self._tau_g
         c = dx / dt
@@ -273,34 +224,39 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
         RT = cs2
 
         feq = self.get_feq_(dx=dx, dt=dt, rho=rho, vel=vel, force=None)
-        geq = self.get_geq_(dx=dx, dt=dt, rho=rho, vel=vel, force=None, pressure=pressure, feq=feq)
+        geq = self.get_geq_(
+            dx=dx, dt=dt, rho=rho, vel=vel, force=None, pressure=pressure, feq=feq
+        )
 
         Gamma_u = self.compute_Gamma(dx=dx, dt=dt, vel=vel)
 
-        # collision_f = (1.0 - 1.0 / tau_f) * f + feq / tau_f
-        collision_f = dt * (1.0 - 0.5 / tau_f) * Gamma_u / RT * (
-            (self._e * c - vel.unsqueeze(1)) * (-dfai.unsqueeze(1))
-        ).sum(dim=2) * dt + (1.0 - 1.0 / tau_f) * f + feq / tau_f
-
-        collision_g = dt * (1.0 - 0.5 / tau_g) * (
-            Gamma_u * (
-                (self._e * c - vel.unsqueeze(1)) * (force.unsqueeze(1))
-            ).sum(dim=2) + \
-            (Gamma_u - self._weight) * (
-                (self._e * c - vel.unsqueeze(1)) * (-dprho.unsqueeze(1))
-            ).sum(dim=2)
-        ) * dt + (1.0 - 1.0 / tau_g) * g + geq / tau_g
-
-        f_new = torch.where(
-            flags == int(CellType.FLUID),
-            collision_f,
-            f
+        collision_f = (
+            dt
+            * (1.0 - 0.5 / tau_f)
+            * Gamma_u
+            / RT
+            * ((self._e * c - vel.unsqueeze(1)) * (-dfai.unsqueeze(1))).sum(dim=2)
+            * dt
+            + f
+            + 1.0 / tau_f * (feq - f)
         )
 
-        g_new = torch.where(
-            flags == int(CellType.FLUID),
-            collision_g,
-            g
+        collision_g = (
+            dt
+            * (1.0 - 0.5 / tau_g)
+            * (
+                Gamma_u
+                * ((self._e * c - vel.unsqueeze(1)) * (force.unsqueeze(1))).sum(dim=2)
+                + (Gamma_u - self._weight)
+                * ((self._e * c - vel.unsqueeze(1)) * (-dprho.unsqueeze(1))).sum(dim=2)
+            )
+            * dt
+            + g
+            + 1.0 / tau_g * (geq - g)
         )
+
+        f_new = torch.where(flags == int(CellType.FLUID), collision_f, f)
+
+        g_new = torch.where(flags == int(CellType.FLUID), collision_g, g)
 
         return [f_new, g_new]
