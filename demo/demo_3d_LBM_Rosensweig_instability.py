@@ -11,48 +11,10 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType, export_asset
+from src.LBM.utils import mkdir, save_img, CellType, export_asset, save_rendered_image
 from tqdm import tqdm
 
 from renderutils import SoftRenderer
-import mcubes
-
-
-def save_image(renderer, phi, filename, res, dx):
-    phi = F.pad(
-        phi[..., 1:-1, 1:-1, 1:-1],
-        pad=(1, 1, 1, 1, 1, 1),
-        mode="constant",
-        value=phi.min().item(),
-    )
-
-    device = phi.device
-    verts, faces = mcubes.marching_cubes(
-        ((phi * (2.0 / max(res) / dx)).cpu().numpy()[0, 0, ...]), 0
-    )
-    verts = torch.from_numpy(verts).to(device).to(torch.float32)
-    faces = torch.from_numpy(faces.astype(np.int)).to(device).to(torch.int)
-    verts = (verts - torch.Tensor(res).to(device) / 2.0) * (2.0 / max(res))
-    textures = torch.cat(
-        (
-            0.68
-            * torch.ones(1, faces.shape[-2], 2, 1, dtype=torch.float32, device=device),
-            0.68
-            * torch.ones(1, faces.shape[-2], 2, 1, dtype=torch.float32, device=device),
-            0.68
-            * torch.ones(1, faces.shape[-2], 2, 1, dtype=torch.float32, device=device),
-        ),
-        dim=-1,
-    )
-    target_image = renderer.forward(verts.unsqueeze(0), faces.unsqueeze(0), textures)
-    imageio.imwrite(
-        filename,
-        (target_image[0].permute(1, 2, 0).detach().cpu().numpy() * 255).astype(
-            np.uint8
-        ),
-    )
-
-    return [verts, faces]
 
 
 def main(
@@ -241,7 +203,7 @@ def main(
                 dim, int(mag_strength), step + 1
             )
             # save_img(density[..., 1:-1, 1:-1, 1:-1], filename=filename)
-            save_image(renderer, phi, filename, res, dx)
+            save_rendered_image(renderer, phi, filename, res, dx)
             fileList.append(filename)
 
     filename = str(
@@ -249,7 +211,7 @@ def main(
     ) + "/demo_data_LBM_{}d_Rosensweig_instability_mag{}/final_frame.png".format(
         dim, int(mag_strength)
     )
-    verts, faces = save_image(renderer, phi, filename, res, dx)
+    verts, faces = save_rendered_image(renderer, phi, filename, res, dx)
     save_path = str(
         path
     ) + "/demo_data_LBM_{}d_Rosensweig_instability_mag{}/Rosensweig_instability.obj".format(
