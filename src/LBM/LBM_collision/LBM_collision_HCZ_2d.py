@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import List
 
 from src.LBM.LBM_collision import LBMCollisionMRT2d
-from src.LBM.utils import CellType
+from src.LBM.utils import CellType, KBCType
 
 
 class LBMCollisionHCZ2d(LBMCollisionMRT2d):
@@ -239,20 +239,37 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
 
         Gamma_u = self.compute_Gamma(dx=dx, dt=dt, vel=vel)
 
+        collision_g = g + 1.0 / tau_g * (geq - g)
+
+        if KBC_type is not None:
+            ds = self.get_s_by_KBC(
+                dx=dx, dt=dt, f=g, rho=rho, vel=vel, KBC_type=KBC_type
+            ) - self.get_s_by_KBC(
+                dx=dx, dt=dt, f=geq, rho=rho, vel=vel, KBC_type=KBC_type
+            )
+            dh = (g - geq) - ds
+
+            beta = 0.5 / tau_g
+            gamma = 1.0 / beta - (2.0 - 1.0 / beta) * (ds * dh / geq).sum(
+                dim=1
+            ).unsqueeze(1) / (dh * dh / geq).sum(dim=1).unsqueeze(1)
+            collision_g = g + beta * (-2.0 * ds - gamma * dh)
+
         collision_f = (
-            dt
-            * (1.0 - 0.5 / tau_f)
-            * Gamma_u
-            / RT
-            * ((self._e * c - vel.unsqueeze(1)) * (-dfai.unsqueeze(1))).sum(dim=2)
-            * dt
-            + f
+            f
             + 1.0 / tau_f * (feq - f)
+            + (
+                dt
+                * (1.0 - 0.5 / tau_f)
+                * Gamma_u
+                / RT
+                * ((self._e * c - vel.unsqueeze(1)) * (-dfai.unsqueeze(1))).sum(dim=2)
+                * dt
+            )
         )
 
-        collision_g = (
-            dt
-            * (1.0 - 0.5 / tau_g)
+        collision_g = collision_g + (
+            (1.0 - 0.5 / tau_g)
             * (
                 Gamma_u
                 * ((self._e * c - vel.unsqueeze(1)) * (force.unsqueeze(1))).sum(dim=2)
@@ -260,8 +277,6 @@ class LBMCollisionHCZ2d(LBMCollisionMRT2d):
                 * ((self._e * c - vel.unsqueeze(1)) * (-dprho.unsqueeze(1))).sum(dim=2)
             )
             * dt
-            + g
-            + 1.0 / tau_g * (geq - g)
         )
 
         f_new = torch.where(flags == int(CellType.FLUID), collision_f, f)

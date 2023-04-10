@@ -330,20 +330,19 @@ class LBMCollisionHCZ3d(LBMCollision3d):
         Gamma_u = self.compute_Gamma(dx=dx, dt=dt, vel=vel)
 
         # collision_f = (1.0 - 1.0 / tau_f) * f + feq / tau_f
-        collision_f = (
+        collision_f = f + (
             dt
             * (1.0 - 0.5 / tau_f)
             * Gamma_u
             / RT
             * ((self._e * c - vel.unsqueeze(1)) * (-dfai.unsqueeze(1))).sum(dim=2)
             * dt
-            + (1.0 - 1.0 / tau_f) * f
+            - f / tau_f
             + feq / tau_f
         )
 
-        collision_g = (
-            dt
-            * (1.0 - 0.5 / tau_g)
+        collision_g = g + (
+            (1.0 - 0.5 / tau_g)
             * (
                 Gamma_u
                 * ((self._e * c - vel.unsqueeze(1)) * (force.unsqueeze(1))).sum(dim=2)
@@ -351,7 +350,7 @@ class LBMCollisionHCZ3d(LBMCollision3d):
                 * ((self._e * c - vel.unsqueeze(1)) * (-dprho.unsqueeze(1))).sum(dim=2)
             )
             * dt
-            + (1.0 - 1.0 / tau_g) * g
+            - g / tau_g
             + geq / tau_g
         )
 

@@ -11,7 +11,7 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType
+from src.LBM.utils import mkdir, save_img, CellType, KBCType
 from tqdm import tqdm
 
 
@@ -36,7 +36,7 @@ def main(
     kappa = 0.01  # sigma / Ia
 
     tau_f = 0.7  # 0.5 + vis / cs2
-    tau_g = tau_f
+    tau_g = 0.8
 
     # dimension of the
     batch_size = 1
@@ -87,6 +87,7 @@ def main(
     prop = simulationRunner.create_propagation()
     macro = simulationRunner.create_macro_compute()
     collision = simulationRunner.create_collision_HCZ()
+    collision.preset_KBC(dx=dx, dt=dt)
     collision.set_gravity(gravity=gravity_strength)
     mgf = simulationRunner.create_LBM_magnetic()
 
@@ -184,6 +185,7 @@ def main(
             pressure=pressure,
             dfai=dfai,
             dprho=dprho,
+            KBC_type=int(KBCType.KBC_A),
         )
 
         simulationRunner.step()

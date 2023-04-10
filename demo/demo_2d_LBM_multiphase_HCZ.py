@@ -34,7 +34,7 @@ def main(
     kappa = 0.1  # sigma / Ia
 
     tau_f = 0.7  # 0.5 + vis / cs2
-    tau_g = tau_f
+    tau_g = 0.8
 
     # dimension of the
     batch_size = 1
@@ -75,6 +75,7 @@ def main(
     density = torch.zeros((batch_size, 1, *res)).to(device).to(dtype)
     force = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     f = torch.zeros((batch_size, Q, *res)).to(device).to(dtype)
+    g = torch.zeros((batch_size, Q, *res)).to(device).to(dtype)
 
     # create external force, advection and pressure projection
     prop = simulationRunner.create_propagation()
@@ -157,7 +158,7 @@ def main(
             pressure=pressure,
             dfai=dfai,
             dprho=dprho,
-            KBC_type=int(KBCType.KBC_A),
+            KBC_type=None,
         )
 
         simulationRunner.step()

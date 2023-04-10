@@ -11,7 +11,7 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType
+from src.LBM.utils import mkdir, save_img, CellType, KBCType
 from tqdm import tqdm
 
 
@@ -35,7 +35,7 @@ def main(
     kappa = 0.1  # sigma / Ia
 
     tau_f = 0.7  # 0.5 + vis / cs2
-    tau_g = tau_f
+    tau_g = 0.8
 
     # dimension of the
     batch_size = 1
@@ -81,6 +81,7 @@ def main(
     prop = simulationRunner.create_propagation()
     macro = simulationRunner.create_macro_compute()
     collision = simulationRunner.create_collision_HCZ()
+    collision.preset_KBC(dx=dx, dt=dt)
     collision.set_gravity(gravity=gravity_strength)
 
     # initialize the domain
@@ -98,7 +99,7 @@ def main(
     fileList = []
 
     # create a droplet
-    sphere_radius = 0.4 * max(res) / 2
+    sphere_radius = 0.6 * max(res) / 2
     for j in range(res[0]):
         for i in range(res[1]):
             if (
@@ -160,6 +161,7 @@ def main(
             pressure=pressure,
             dfai=dfai,
             dprho=dprho,
+            KBC_type=int(KBCType.KBC_A),
         )
 
         simulationRunner.step()
@@ -216,7 +218,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gravity_strength",
         type=float,
-        default=0.0,
+        default=0.00001,
         help=("Gravity Strength"),
     )
 
