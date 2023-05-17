@@ -135,25 +135,29 @@ class LBMMagnetic2d(AbstractLBMMagnetic):
             1.0 - self._weight[:, 0:1, ...]
         )  # [B, 1, *res]
 
-        H_int = -LBMCollisionHCZ2d.get_grad(input_=psi, dx=dx, flags=flags)
-
         # collision step
         heq = self.get_heq_(psi=psi)
-        phi_mac_x, phi_mac_y = get_staggered_x(phi), get_staggered_y(phi)
         H_ext_mac_x, H_ext_mac_y = H_ext_mac
-        chi_mac_x = k * (self.smooth_phi(phi=phi_mac_x, eps=0.1 * dx))
-        chi_mac_y = k * (self.smooth_phi(phi=phi_mac_y, eps=0.1 * dx))
+        chi = k * (1.0 - self.smooth_phi(phi=phi, eps=0.1 * dx))
+        chi_mac_x = get_staggered_x(chi, mode="replicate")
+        chi_mac_y = get_staggered_y(chi, mode="replicate")
         chi_H_ext_mac_x = chi_mac_x * H_ext_mac_x
         chi_H_ext_mac_y = chi_mac_y * H_ext_mac_y
         rhs = (
-            (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1])
-            + (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
-        ) / dx
+            (
+                (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1])
+                + (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
+            )
+            * dx
+            / (1.0 + chi)
+        )
         # only count where there is fluid
         rhs = torch.where(flags == int(CellType.FLUID), rhs, torch.zeros_like(rhs))
         add_h = dt * weight_bar * rhs * (cs2 * (0.5 - tau) * dt)
-        new_h = (1.0 - 1.0 / tau) * h + (1.0 / tau) * heq + add_h
+        collision_h = (1.0 - 1.0 / tau) * h + (1.0 / tau) * heq + add_h
+        new_h = torch.where(flags == int(CellType.OBSTACLE), h, collision_h)
 
+        H_int = -LBMCollisionHCZ2d.get_grad(input_=psi, dx=dx, flags=flags)
         # dim = 2
         # H_int[(flags == int(CellType.OBSTACLE)).repeat(1, dim, *([1] * dim))] = 0
 

@@ -52,12 +52,12 @@ def save_rendered_image(renderer, phi, filename, res, dx):
         phi[..., 1:-1, 1:-1, 1:-1],
         pad=(1, 1, 1, 1, 1, 1),
         mode="constant",
-        value=phi.min().item(),
+        value=phi.max().item(),
     )
 
     device = phi.device
     verts, faces = mcubes.marching_cubes(
-        ((phi * (2.0 / max(res) / dx)).cpu().numpy()[0, 0, ...]), 0
+        ((-phi * (2.0 / max(res) / dx)).cpu().numpy()[0, 0, ...]), 0
     )
     verts = torch.from_numpy(verts).to(device).to(torch.float32)
     faces = torch.from_numpy(faces.astype(np.int)).to(device).to(torch.int)

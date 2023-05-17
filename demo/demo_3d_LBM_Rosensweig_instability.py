@@ -11,7 +11,14 @@ from typing import List
 sys.path.append("../")
 
 from src.LBM.simulation import SimulationParameters, SimulationRunner
-from src.LBM.utils import mkdir, save_img, CellType, export_asset, save_rendered_image
+from src.LBM.utils import (
+    mkdir,
+    save_img,
+    CellType,
+    export_asset,
+    get_staggered,
+    save_rendered_image,
+)
 from tqdm import tqdm
 
 from renderutils import SoftRenderer
@@ -38,7 +45,7 @@ def main(
     kappa = 0.01  # sigma / Ia
 
     tau_f = 0.68  # 0.5 + vis / cs2
-    tau_g = tau_f
+    tau_g = 0.68
 
     # dimension of the
     batch_size = 1
@@ -107,13 +114,8 @@ def main(
 
     # initialize the domain
     # wall = ["xXyYzZ"]
-    flags[...] = int(CellType.FLUID)
-    flags = F.pad(
-        flags[..., 1:-1, 1:-1, 1:-1],
-        pad=(1, 1, 1, 1, 1, 1),
-        mode="constant",
-        value=int(CellType.OBSTACLE),
-    )
+    flags[...] = int(CellType.OBSTACLE)
+    flags[..., 1:-1, 1:-1, 1:-1] = int(CellType.FLUID)
     # magnetic_wall = ["xX  zZ"]
     magnetic_flags[...] = int(CellType.OBSTACLE)
     magnetic_flags[..., 1:-1, :, 1:-1] = int(CellType.FLUID)
@@ -142,19 +144,13 @@ def main(
         feq=f,
     )
 
-    H_ext_mac = [
-        torch.zeros((batch_size, 1, res[0], res[1], res[2] + 1)).to(device).to(dtype),
-        mag_strength
-        * torch.ones((batch_size, 1, res[0], res[1] + 1, res[2])).to(device).to(dtype),
-        torch.zeros((batch_size, 1, res[0] + 1, res[1], res[2])).to(device).to(dtype),
-    ]
     H_ext_const_real = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     H_ext_const_real[:, 1, ...] = mag_strength
+    H_ext_mac = get_staggered(H_ext_const_real, mode="replicate")
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
         g = prop.propagation(f=g)
-        h = prop.propagation(f=h)
 
         rho, vel, density = macro.macro_compute(
             dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density
@@ -162,12 +158,19 @@ def main(
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
         g = prop.rebounce_obstacle(f=g, flags=flags)
-        h = prop.rebounce_obstacle(f=h, flags=magnetic_flags)
 
-        phi = 2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0
-        H_int, h = mgf.get_H_int(
-            dt=dt, dx=dx, phi=phi, flags=magnetic_flags, H_ext_mac=H_ext_mac, h=h
-        )
+        phi = -(2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0)
+        for i in range(30):
+            h = prop.propagation(f=h)
+            h = prop.rebounce_obstacle(f=h, flags=magnetic_flags)
+            H_int, h = mgf.get_H_int(
+                dt=dt,
+                dx=dx,
+                phi=phi,
+                flags=magnetic_flags,
+                H_ext_mac=H_ext_mac,
+                h=h,
+            )
         H2 = (
             ((H_ext_const_real + H_int) * (H_ext_const_real + H_int))
             .sum(dim=1)
@@ -200,6 +203,7 @@ def main(
             pressure=pressure,
             dfai=dfai,
             dprho=dprho,
+            KBC_type=None,
         )
 
         simulationRunner.step()

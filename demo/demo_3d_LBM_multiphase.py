@@ -153,7 +153,7 @@ def main(
         f = prop.rebounce_obstacle(f=f, flags=flags)
         g = prop.rebounce_obstacle(f=g, flags=flags)
 
-        phi = 2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0
+        phi = -(2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0)
 
         rho, vel, density, pressure, force, dfai, dprho = collision.capillary_process(
             rho=rho,

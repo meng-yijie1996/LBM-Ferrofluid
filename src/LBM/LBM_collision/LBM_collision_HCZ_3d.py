@@ -231,7 +231,7 @@ class LBMCollisionHCZ3d(LBMCollision3d):
         if H2 is not None:
             mu0 = 4 * math.pi * 1e-7
             k = 0.33
-            chi = k * (self.smooth_phi(phi=phi, eps=0.1 * dx))
+            chi = k * (1.0 - self.smooth_phi(phi=phi, eps=0.1 * dx))
             force += (
                 -0.5
                 * mu0

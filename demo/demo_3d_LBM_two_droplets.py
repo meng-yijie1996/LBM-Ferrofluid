@@ -22,7 +22,6 @@ from src.LBM.utils import (
 from tqdm import tqdm
 
 from renderutils import SoftRenderer
-import mcubes
 
 
 def main(
@@ -43,10 +42,10 @@ def main(
     rho_fluid = 0.2508
     rho_wall = 0.2508
 
-    kappa = 0.01  # sigma / Ia
+    kappa = 0.5  # sigma / Ia
 
     tau_f = 0.68  # 0.5 + vis / cs2
-    tau_g = tau_f
+    tau_g = 0.68
 
     # dimension of the
     batch_size = 1
@@ -115,13 +114,8 @@ def main(
 
     # initialize the domain
     # wall = ["xXyYzZ"]
-    flags[...] = int(CellType.FLUID)
-    flags = F.pad(
-        flags[..., 1:-1, 1:-1, 1:-1],
-        pad=(1, 1, 1, 1, 1, 1),
-        mode="constant",
-        value=int(CellType.OBSTACLE),
-    )
+    flags[...] = int(CellType.OBSTACLE)
+    flags[..., 1:-1, 1:-1, 1:-1] = int(CellType.FLUID)
     # magnetic_wall = ["xXyYzZ"]
     magnetic_flags[...] = int(CellType.OBSTACLE)
     magnetic_flags[..., 1:-1, 1:-1, 1:-1] = int(CellType.FLUID)
@@ -134,30 +128,26 @@ def main(
     rho[...] = rho_gas
     density[...] = density_gas
     radius = min(res) // 4
-    rho[
-        ...,
-        res[0] // 2 - radius : res[0] // 2 + radius,
-        res[1] // 2 - radius : res[1] // 2 + radius,
-        int(3 * res[2] / 8) - radius : int(3 * res[2] / 8) + radius,
-    ] = rho_fluid
-    density[
-        ...,
-        res[0] // 2 - radius : res[0] // 2 + radius,
-        res[1] // 2 - radius : res[1] // 2 + radius,
-        int(3 * res[2] / 8) - radius : int(3 * res[2] / 8) + radius,
-    ] = density_fluid
-    rho[
-        ...,
-        res[0] // 2 - radius : res[0] // 2 + radius,
-        res[1] // 2 - radius : res[1] // 2 + radius,
-        int(5 * res[2] / 8) - radius : int(5 * res[2] / 8) + radius,
-    ] = rho_fluid
-    density[
-        ...,
-        res[0] // 2 - radius : res[0] // 2 + radius,
-        res[1] // 2 - radius : res[1] // 2 + radius,
-        int(5 * res[2] / 8) - radius : int(5 * res[2] / 8) + radius,
-    ] = density_fluid
+
+    center_l = [res[0] // 2, res[1] // 2, 3 * res[2] // 8]
+    center_r = [res[0] // 2, res[1] // 2, 5 * res[2] // 8]
+    for r in range(res[0]):
+        for j in range(res[1]):
+            for i in range(res[2]):
+                if (r - center_l[0]) * (r - center_l[0]) + (j - center_l[1]) * (
+                    j - center_l[1]
+                ) + (i - center_l[2]) * (i - center_l[2]) <= radius * radius:
+                    rho[..., r, j, i] = rho_fluid
+                    density[..., r, j, i] = density_fluid
+                elif (r - center_r[0]) * (r - center_r[0]) + (j - center_r[1]) * (
+                    j - center_r[1]
+                ) + (i - center_r[2]) * (i - center_r[2]) <= radius * radius:
+                    rho[..., r, j, i] = rho_fluid
+                    density[..., r, j, i] = density_fluid
+                else:
+                    rho[..., r, j, i] = rho_gas
+                    density[..., r, j, i] = density_gas
+
     rho[flags == int(CellType.OBSTACLE)] = rho_wall
     density[flags == int(CellType.OBSTACLE)] = density_wall
     pressure = macro.get_pressure(dx=dx, dt=dt, density=density)
@@ -175,12 +165,11 @@ def main(
 
     H_ext_const_real = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     H_ext_const_real[:, 1, ...] = mag_strength
-    H_ext_mac = get_staggered(H_ext_const_real)
+    H_ext_mac = get_staggered(H_ext_const_real, mode="replicate")
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
         g = prop.propagation(f=g)
-        h = prop.propagation(f=h)
 
         rho, vel, density = macro.macro_compute(
             dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density
@@ -188,12 +177,19 @@ def main(
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
         g = prop.rebounce_obstacle(f=g, flags=flags)
-        h = prop.rebounce_obstacle(f=h, flags=magnetic_flags)
 
-        phi = 2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0
-        H_int, h = mgf.get_H_int(
-            dt=dt, dx=dx, phi=phi, flags=magnetic_flags, H_ext_mac=H_ext_mac, h=h
-        )
+        phi = -(2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0)
+        for i in range(30):
+            h = prop.propagation(f=h)
+            h = prop.rebounce_obstacle(f=h, flags=magnetic_flags)
+            H_int, h = mgf.get_H_int(
+                dt=dt,
+                dx=dx,
+                phi=phi,
+                flags=magnetic_flags,
+                H_ext_mac=H_ext_mac,
+                h=h,
+            )
         H2 = (
             ((H_ext_const_real + H_int) * (H_ext_const_real + H_int))
             .sum(dim=1)
@@ -226,11 +222,12 @@ def main(
             pressure=pressure,
             dfai=dfai,
             dprho=dprho,
+            KBC_type=None,
         )
 
         simulationRunner.step()
         # impl this
-        if step % 10 == 0:
+        if step % 100 == 0:
             filename = str(
                 path
             ) + "/demo_data_LBM_{}d_two_droplets_mag{}/{:03}.png".format(
@@ -242,7 +239,7 @@ def main(
 
     #  VIDEO Loop
     writer = imageio.get_writer(
-        f"{path}/{dim}d_LBM_two_droplets_mg{int(mag_strength)}.mp4", fps=25
+        f"{path}/{dim}d_LBM_two_droplets_mag{int(mag_strength)}.mp4", fps=25
     )
 
     for im in fileList:
@@ -259,14 +256,14 @@ if __name__ == "__main__":
         "--res",
         type=int,
         nargs="+",
-        default=[98, 98, 384],
+        default=[50, 50, 193],
         help="Simulation size of the current simulation currently only square",
     )
 
     parser.add_argument(
         "--total_steps",
         type=int,
-        default=2450,
+        default=8000,
         help="For how many step to run the simulation",
     )
 

@@ -214,21 +214,24 @@ class LBMCollision3d(AbstractLBMCollision):
         dim = 3
         pad = (1, 1, 1, 1, 1, 1)
 
+        input_obs = F.pad(input_[..., 1:-1, 1:-1, 1:-1], pad=pad, mode="replicate")
+        input_new = torch.where(flags == int(CellType.OBSTACLE), input_obs, input_)
+
         output_inner = torch.zeros_like(input_[..., 1:-1, 1:-1, 1:-1]).repeat(
             1, 3, *([1] * dim)
         )
         output_inner[:, 0:1, ...] = (
             (
-                2.0 * (input_[..., 1:-1, 1:-1, 2:] - input_[..., 1:-1, 1:-1, :-2])
+                2.0 * (input_new[..., 1:-1, 1:-1, 2:] - input_new[..., 1:-1, 1:-1, :-2])
                 + (
-                    input_[..., 2:, 1:-1, 2:]
-                    - input_[..., :-2, 1:-1, :-2]
-                    + input_[..., :-2, 1:-1, 2:]
-                    - input_[..., 2:, 1:-1, :-2]
-                    + input_[..., 1:-1, 2:, 2:]
-                    - input_[..., 1:-1, :-2, :-2]
-                    + input_[..., 1:-1, :-2, 2:]
-                    - input_[..., 1:-1, 2:, :-2]
+                    input_new[..., 2:, 1:-1, 2:]
+                    - input_new[..., :-2, 1:-1, :-2]
+                    + input_new[..., :-2, 1:-1, 2:]
+                    - input_new[..., 2:, 1:-1, :-2]
+                    + input_new[..., 1:-1, 2:, 2:]
+                    - input_new[..., 1:-1, :-2, :-2]
+                    + input_new[..., 1:-1, :-2, 2:]
+                    - input_new[..., 1:-1, 2:, :-2]
                 )
             )
             / 12.0
@@ -237,16 +240,16 @@ class LBMCollision3d(AbstractLBMCollision):
 
         output_inner[:, 1:2, ...] = (
             (
-                2.0 * (input_[..., 1:-1, 2:, 1:-1] - input_[..., 1:-1, :-2, 1:-1])
+                2.0 * (input_new[..., 1:-1, 2:, 1:-1] - input_new[..., 1:-1, :-2, 1:-1])
                 + (
-                    input_[..., 2:, 2:, 1:-1]
-                    - input_[..., :-2, :-2, 1:-1]
-                    + input_[..., :-2, 2:, 1:-1]
-                    - input_[..., 2:, :-2, 1:-1]
-                    + input_[..., 1:-1, 2:, 2:]
-                    - input_[..., 1:-1, :-2, :-2]
-                    + input_[..., 1:-1, 2:, :-2]
-                    - input_[..., 1:-1, :-2, 2:]
+                    input_new[..., 2:, 2:, 1:-1]
+                    - input_new[..., :-2, :-2, 1:-1]
+                    + input_new[..., :-2, 2:, 1:-1]
+                    - input_new[..., 2:, :-2, 1:-1]
+                    + input_new[..., 1:-1, 2:, 2:]
+                    - input_new[..., 1:-1, :-2, :-2]
+                    + input_new[..., 1:-1, 2:, :-2]
+                    - input_new[..., 1:-1, :-2, 2:]
                 )
             )
             / 12.0
@@ -255,29 +258,23 @@ class LBMCollision3d(AbstractLBMCollision):
 
         output_inner[:, 2:3, ...] = (
             (
-                2.0 * (input_[..., 2:, 1:-1, 1:-1] - input_[..., :-2, 1:-1, 1:-1])
+                2.0 * (input_new[..., 2:, 1:-1, 1:-1] - input_new[..., :-2, 1:-1, 1:-1])
                 + (
-                    input_[..., 2:, 2:, 1:-1]
-                    - input_[..., :-2, :-2, 1:-1]
-                    + input_[..., 2:, :-2, 1:-1]
-                    - input_[..., :-2, 2:, 1:-1]
-                    + input_[..., 2:, 1:-1, 2:]
-                    - input_[..., :-2, 1:-1, :-2]
-                    + input_[..., 2:, 1:-1, :-2]
-                    - input_[..., :-2, 1:-1, 2:]
+                    input_new[..., 2:, 2:, 1:-1]
+                    - input_new[..., :-2, :-2, 1:-1]
+                    + input_new[..., 2:, :-2, 1:-1]
+                    - input_new[..., :-2, 2:, 1:-1]
+                    + input_new[..., 2:, 1:-1, 2:]
+                    - input_new[..., :-2, 1:-1, :-2]
+                    + input_new[..., 2:, 1:-1, :-2]
+                    - input_new[..., :-2, 1:-1, 2:]
                 )
             )
             / 12.0
             / dx
         )
 
-        output = torch.where(
-            flags == int(CellType.OBSTACLE),
-            F.pad(output_inner, pad=pad, mode="constant", value=0),
-            F.pad(output_inner, pad=pad, mode="replicate"),
-        )
-
-        # output = F.pad(output_inner, pad=pad, mode="replicate")
+        output = F.pad(output_inner, pad=pad, mode="replicate")
 
         return output
 

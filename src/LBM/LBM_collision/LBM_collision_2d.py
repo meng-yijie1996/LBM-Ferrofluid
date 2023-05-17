@@ -189,8 +189,7 @@ class LBMCollision2d(AbstractLBMCollision):
         pad = (1, 1, 1, 1)
 
         input_obs = F.pad(input_[..., 1:-1, 1:-1], pad=pad, mode="replicate")
-        input_fluid = F.pad(input_[..., 1:-1, 1:-1], pad=pad, mode="constant", value=0)
-        input_new = torch.where(flags == int(CellType.OBSTACLE), input_obs, input_fluid)
+        input_new = torch.where(flags == int(CellType.OBSTACLE), input_obs, input_)
 
         output_inner = torch.zeros_like(input_[..., 1:-1, 1:-1]).repeat(
             1, dim, *([1] * dim)

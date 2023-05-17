@@ -15,6 +15,7 @@ from src.LBM.utils import (
     mkdir,
     save_img,
     CellType,
+    KBCType,
     dump_2d_plt_file_single,
     get_staggered,
 )
@@ -39,10 +40,10 @@ def main(
     rho_fluid = 0.2508
     rho_wall = 0.2508
 
-    kappa = 0.01  # sigma / Ia
+    kappa = 0.5  # sigma / Ia
 
     tau_f = 0.68  # 0.5 + vis / cs2
-    tau_g = tau_f
+    tau_g = 0.68
 
     # dimension of the
     batch_size = 1
@@ -93,18 +94,14 @@ def main(
     prop = simulationRunner.create_propagation()
     macro = simulationRunner.create_macro_compute()
     collision = simulationRunner.create_collision_HCZ()
+    collision.preset_KBC(dx=dx, dt=dt)
     collision.set_gravity(gravity=gravity_strength)
     mgf = simulationRunner.create_LBM_magnetic()
 
     # initialize the domain
     # wall = ["xXyY"]
-    flags[...] = int(CellType.FLUID)
-    flags = F.pad(
-        flags[..., 1:-1, 1:-1],
-        pad=(1, 1, 1, 1),
-        mode="constant",
-        value=int(CellType.OBSTACLE),
-    )
+    flags[...] = int(CellType.OBSTACLE)
+    flags[..., 1:-1, 1:-1] = int(CellType.FLUID)
     # magnetic_wall = ["xXyY"]
     magnetic_flags[...] = int(CellType.OBSTACLE)
     magnetic_flags[..., 1:-1, 1:-1] = int(CellType.FLUID)
@@ -117,10 +114,6 @@ def main(
     rho[...] = rho_gas
     density[...] = density_gas
     radius = min(res) // 4
-    # rho[...,  res[0] // 2 - radius: res[0] // 2 + radius, int(3 * res[1] / 8) - radius: int(3 * res[1] / 8) + radius] = rho_fluid
-    # density[...,  res[0] // 2 - radius: res[0] // 2 + radius, int(3 * res[1] / 8) - radius: int(3 * res[1] / 8) + radius] = density_fluid
-    # rho[...,  res[0] // 2 - radius: res[0] // 2 + radius, int(5 * res[1] / 8) - radius: int(5 * res[1] / 8) + radius] = rho_fluid
-    # density[...,  res[0] // 2 - radius: res[0] // 2 + radius, int(5 * res[1] / 8) - radius: int(5 * res[1] / 8) + radius] = density_fluid
 
     center_l = [res[0] // 2, 3 * res[1] // 8]
     center_r = [res[0] // 2, 5 * res[1] // 8]
@@ -157,12 +150,11 @@ def main(
 
     H_ext_const_real = torch.zeros((batch_size, dim, *res)).to(device).to(dtype)
     H_ext_const_real[:, 1, ...] = mag_strength
-    H_ext_mac = get_staggered(H_ext_const_real)
+    H_ext_mac = get_staggered(H_ext_const_real, mode="replicate")
 
     for step in tqdm(range(total_steps)):
         f = prop.propagation(f=f)
         g = prop.propagation(f=g)
-        h = prop.propagation(f=h)
 
         rho, vel, density = macro.macro_compute(
             dx=dx, dt=dt, f=f, rho=rho, vel=vel, flags=flags, density=density
@@ -170,12 +162,19 @@ def main(
 
         f = prop.rebounce_obstacle(f=f, flags=flags)
         g = prop.rebounce_obstacle(f=g, flags=flags)
-        h = prop.rebounce_obstacle(f=h, flags=magnetic_flags)
 
-        phi = 2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0
-        H_int, h = mgf.get_H_int(
-            dt=dt, dx=dx, phi=phi, flags=magnetic_flags, H_ext_mac=H_ext_mac, h=h
-        )
+        phi = -(2.0 * (density - density_gas) / (density_fluid - density_gas) - 1.0)
+        for i in range(30):
+            h = prop.propagation(f=h)
+            h = prop.rebounce_obstacle(f=h, flags=magnetic_flags)
+            H_int, h = mgf.get_H_int(
+                dt=dt,
+                dx=dx,
+                phi=phi,
+                flags=magnetic_flags,
+                H_ext_mac=H_ext_mac,
+                h=h,
+            )
         H2 = (
             ((H_ext_const_real + H_int) * (H_ext_const_real + H_int))
             .sum(dim=1)
@@ -208,11 +207,12 @@ def main(
             pressure=pressure,
             dfai=dfai,
             dprho=dprho,
+            KBC_type=None,
         )
 
         simulationRunner.step()
         # impl this
-        if step % 10 == 0:
+        if step % 100 == 0:
             filename = str(
                 path
             ) + "/demo_data_LBM_{}d_two_droplets_mag{}/{:03}.png".format(
@@ -221,14 +221,17 @@ def main(
             save_img(density[..., 1:-1, 1:-1], filename=filename)
             fileList.append(filename)
 
-        if step % 50 == 0:
+        if step == 400:
             filename_plt = str(
                 path
             ) + "/demo_data_LBM_{}d_two_droplets_mag{}/mag_{:03}.plt".format(
                 dim, int(mag_strength), step + 1
             )
             dump_2d_plt_file_single(
-                filename_plt, density.cpu().numpy(), H_int.cpu().numpy(), 0
+                filename_plt,
+                density[..., 1:-1, 1:-1].cpu().numpy(),
+                H_int[..., 1:-1, 1:-1].cpu().numpy(),
+                0,
             )
 
     #  VIDEO Loop
@@ -257,7 +260,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--total_steps",
         type=int,
-        default=2450,
+        default=8000,
         help="For how many step to run the simulation",
     )
 

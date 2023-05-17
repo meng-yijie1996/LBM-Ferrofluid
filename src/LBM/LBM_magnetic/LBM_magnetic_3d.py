@@ -145,8 +145,6 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
         Returns:
             torch.Tensor: induced H_int: [B, dim, res]
         """
-        dim = 3
-
         # macro variables computing
         tau = self._tau
         weight_bar = self._weight
@@ -158,32 +156,33 @@ class LBMMagnetic3d(AbstractLBMMagnetic):
             1.0 - self._weight[:, 0:1, ...]
         )  # [B, 1, *res]
 
-        H_int = -LBMCollisionHCZ3d.get_grad(input_=psi, dx=dx, flags=flags)
-
         # collision step
         heq = self.get_heq_(psi=psi)
-        phi_mac_x, phi_mac_y, phi_mac_z = (
-            get_staggered_x(phi),
-            get_staggered_y(phi),
-            get_staggered_z(phi),
-        )
         H_ext_mac_x, H_ext_mac_y, H_ext_mac_z = H_ext_mac
-        chi_mac_x = k * (self.smooth_phi(phi=phi_mac_x, eps=0.1 * dx))
-        chi_mac_y = k * (self.smooth_phi(phi=phi_mac_y, eps=0.1 * dx))
-        chi_mac_z = k * (self.smooth_phi(phi=phi_mac_z, eps=0.1 * dx))
+        chi = k * (1.0 - self.smooth_phi(phi=phi, eps=0.1 * dx))
+        chi_mac_x = get_staggered_x(chi, mode="replicate")
+        chi_mac_y = get_staggered_y(chi, mode="replicate")
+        chi_mac_z = get_staggered_z(chi, mode="replicate")
         chi_H_ext_mac_x = chi_mac_x * H_ext_mac_x
         chi_H_ext_mac_y = chi_mac_y * H_ext_mac_y
         chi_H_ext_mac_z = chi_mac_z * H_ext_mac_z
         rhs = (
-            (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1])
-            + (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
-            + (chi_H_ext_mac_z[..., 1:, :, :] - chi_H_ext_mac_z[..., :-1, :, :])
-        ) / dx
+            (
+                (chi_H_ext_mac_x[..., 1:] - chi_H_ext_mac_x[..., :-1])
+                + (chi_H_ext_mac_y[..., 1:, :] - chi_H_ext_mac_y[..., :-1, :])
+                + (chi_H_ext_mac_z[..., 1:, :, :] - chi_H_ext_mac_z[..., :-1, :, :])
+            )
+            * dx
+            / (1.0 + chi)
+        )
         # only count where there is fluid
         rhs = torch.where(flags == int(CellType.FLUID), rhs, torch.zeros_like(rhs))
         add_h = dt * weight_bar * rhs * (cs2 * (0.5 - tau) * dt)
-        new_h = (1.0 - 1.0 / tau) * h + (1.0 / tau) * heq + add_h
+        collision_h = (1.0 - 1.0 / tau) * h + (1.0 / tau) * heq + add_h
+        new_h = torch.where(flags == int(CellType.OBSTACLE), h, collision_h)
 
-        H_int[(flags == int(CellType.OBSTACLE)).repeat(1, dim, *([1] * dim))] = 0
+        H_int = -LBMCollisionHCZ3d.get_grad(input_=psi, dx=dx, flags=flags)
+        # dim = 3
+        # H_int[(flags == int(CellType.OBSTACLE)).repeat(1, dim, *([1] * dim))] = 0
 
         return [H_int, new_h]
