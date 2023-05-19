@@ -257,7 +257,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--total_steps",
         type=int,
-        default=2450,
+        default=8000,
         help="For how many step to run the simulation",
     )
 
